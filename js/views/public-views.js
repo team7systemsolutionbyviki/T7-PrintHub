@@ -1687,9 +1687,8 @@ export const PublicViews = {
         window._lastTrackedStatuses[freshOrder.id] = freshOrder.status;
       });
 
-      const newHTML = results.map(order => renderOrderTrackCard(order)).join('');
-      if (!isSilentUpdate || statusChanged || container.innerHTML !== newHTML) {
-        container.innerHTML = newHTML;
+      if (!isSilentUpdate || statusChanged || !container.innerHTML.includes(results[0].id)) {
+        container.innerHTML = results.map(order => renderOrderTrackCard(order)).join('');
       }
     };
 
@@ -1697,17 +1696,7 @@ export const PublicViews = {
     if (searchBtn) searchBtn.onclick = () => searchAction(false);
     if (paramId) searchAction(false);
 
-    // --- LIVE WEBSOCKET SUBSCRIBER (Instant Zero-Refresh Updates) ---
-    if (window._unsubTrackLive) {
-      try { window._unsubTrackLive(); } catch (e) {}
-    }
-    window._unsubTrackLive = DBService.onOrdersUpdated(() => {
-      if (window.location.hash.startsWith('#track')) {
-        searchAction(true);
-      }
-    });
-
-    // --- LIVE REFRESH FALLBACK TIMER FOR TRACK ORDER PAGE (2-second Polling) ---
+    // --- LIVE REFRESH SYNC TIMER FOR TRACK ORDER PAGE (3-second Polling) ---
     if (window._trackOrderSyncTimer) {
       clearInterval(window._trackOrderSyncTimer);
     }
@@ -1716,13 +1705,10 @@ export const PublicViews = {
       if (!window.location.hash.startsWith('#track')) {
         clearInterval(window._trackOrderSyncTimer);
         window._trackOrderSyncTimer = null;
-        if (window._unsubTrackLive) {
-          try { window._unsubTrackLive(); window._unsubTrackLive = null; } catch (e) {}
-        }
         return;
       }
       searchAction(true);
-    }, 2000);
+    }, 3000);
   },
 
   // --- FAQ PAGE ---

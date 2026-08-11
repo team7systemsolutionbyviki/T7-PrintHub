@@ -122,85 +122,13 @@ export const DBService = {
   },
 
   // ══════════════════════════════════════════════════════════════════════
-  //  ORDER MERGE HELPER & LIVE SYNC LISTENERS
+  //  ORDER MERGE HELPER
   // ══════════════════════════════════════════════════════════════════════
-
-  _ordersSubscribers: new Set(),
-  _liveListenerActive: false,
-
-  onOrdersUpdated(callback) {
-    if (typeof callback === 'function') {
-      this._ordersSubscribers.add(callback);
-    }
-    this.startLiveOrdersListener();
-    return () => this._ordersSubscribers.delete(callback);
-  },
-
-  notifyOrdersUpdated() {
-    this._ordersSubscribers.forEach(cb => {
-      try { cb(_ordersCache); } catch (e) {}
-    });
-  },
-
-  async startLiveOrdersListener() {
-    if (this._liveListenerActive) return;
-    const { db, firebaseApp, isDemo } = svc();
-    if (isDemo || !firebaseApp) return;
-
-    this._liveListenerActive = true;
-
-    // Real-time Firestore snapshot listener
-    if (db) {
-      (async () => {
-        try {
-          const { collection, onSnapshot, query, orderBy } = await fs();
-          const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-          onSnapshot(q, (snap) => {
-            const freshFsOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            const map = new Map();
-            (_ordersCache || []).forEach(o => map.set(o.id, o));
-            freshFsOrders.forEach(o => map.set(o.id, this.mergeOrderObjects(map.get(o.id), o)));
-            _ordersCache = Array.from(map.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            this.notifyOrdersUpdated();
-          }, (err) => console.warn('Firestore live listener notice:', err));
-        } catch (e) {
-          console.warn('Start Firestore live listener error:', e);
-        }
-      })();
-    }
-
-    // Real-time RTDB listener
-    (async () => {
-      try {
-        const { getDatabase, ref, onValue } = await rtdb();
-        const db2 = getDatabase(firebaseApp);
-        onValue(ref(db2, 'orders'), (snap) => {
-          if (!snap.exists()) return;
-          const freshRtOrders = Object.entries(snap.val()).map(([id, o]) => ({ id, ...o }));
-          const map = new Map();
-          (_ordersCache || []).forEach(o => map.set(o.id, o));
-          freshRtOrders.forEach(o => map.set(o.id, this.mergeOrderObjects(map.get(o.id), o)));
-          _ordersCache = Array.from(map.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-          this.notifyOrdersUpdated();
-        }, (err) => console.warn('RTDB live listener notice:', err));
-      } catch (e) {
-        console.warn('Start RTDB live listener error:', e);
-      }
-    })();
-  },
 
   mergeOrderObjects(existing, incoming) {
     if (!existing) return incoming;
     if (!incoming) return existing;
-
-    const tExisting = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-    const tIncoming = new Date(incoming.updatedAt || incoming.createdAt || 0).getTime();
-
-    // The newer object takes primary precedence so older DB state never overwrites newer status
-    const primary   = tIncoming >= tExisting ? incoming : existing;
-    const secondary = tIncoming >= tExisting ? existing : incoming;
-
-    const merged = { ...secondary, ...primary };
+    const merged = { ...existing, ...incoming };
 
     // Smart-merge files array
     if (existing.files || incoming.files) {
@@ -488,12 +416,12 @@ export const DBService = {
             const db2 = getDatabase(firebaseApp);
             await update(ref(db2, 'orders/' + orderId), rtdbUpdateObj);
           })()
+        ]);
       } catch (e) {
         console.warn('Status sync error:', e);
       }
     }
 
-    this.notifyOrdersUpdated();
     return idx !== -1 ? orders[idx] : { id: orderId, status: newStatus, orderStatus: newStatus };
   },
 
