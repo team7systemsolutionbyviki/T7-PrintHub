@@ -49,7 +49,7 @@ export const CustomerViews = {
       return;
     }
 
-    const orders = await DBService.getOrders();
+    const orders = await DBService.getOrders(true);
     const userPhoneClean = (user.phone || '').replace(/\D/g, '');
     const myOrders = orders.filter(o => {
       const oPhoneClean = (o.customerPhone || '').replace(/\D/g, '');

@@ -168,15 +168,14 @@ export const DBService = {
   //  GET ALL ORDERS — Firebase only, parallel fetch, memory cache
   // ══════════════════════════════════════════════════════════════════════
 
-  async getOrders() {
-    // 1. Return in-memory cache immediately
-    if (_ordersCache) return _ordersCache;
+  async getOrders(forceRefresh = false) {
+    // 1. Return in-memory cache immediately unless forceRefresh requested
+    if (_ordersCache && !forceRefresh) return _ordersCache;
 
     const { db, firebaseApp, isDemo } = svc();
 
     if (isDemo || !firebaseApp) {
-      // No Firebase configured — return empty list
-      _ordersCache = [];
+      _ordersCache = _ordersCache || [];
       return _ordersCache;
     }
 
@@ -230,20 +229,21 @@ export const DBService = {
   //  SEARCH & GET BY ID
   // ══════════════════════════════════════════════════════════════════════
 
-  async searchOrders(queryStr) {
-    const orders = await this.getOrders();
+  async searchOrders(queryStr, forceRefresh = false) {
+    const orders = await this.getOrders(forceRefresh);
     const q = queryStr.trim().toLowerCase();
     return orders.filter(o =>
-      o.id.toLowerCase().includes(q) ||
+      (o.id && o.id.toLowerCase().includes(q)) ||
+      (o.orderId && o.orderId.toLowerCase().includes(q)) ||
       (o.customerPhone || '').includes(q) ||
       (o.customerName || '').toLowerCase().includes(q)
     );
   },
 
-  async getOrderById(orderId) {
-    // Try cache first
-    if (_ordersCache) {
-      const found = _ordersCache.find(o => o.id === orderId);
+  async getOrderById(orderId, forceRefresh = false) {
+    // Try cache first if forceRefresh is false
+    if (_ordersCache && !forceRefresh) {
+      const found = _ordersCache.find(o => o.id === orderId || o.orderId === orderId);
       if (found) return found;
     }
     // Direct Firestore lookup (fast single-doc read)
@@ -252,7 +252,15 @@ export const DBService = {
       try {
         const { doc, getDoc } = await fs();
         const snap = await getDoc(doc(db, 'orders', orderId));
-        if (snap.exists()) return { id: snap.id, ...snap.data() };
+        if (snap.exists()) {
+          const freshDoc = { id: snap.id, ...snap.data() };
+          if (_ordersCache) {
+            const idx = _ordersCache.findIndex(o => o.id === orderId || o.orderId === orderId);
+            if (idx !== -1) _ordersCache[idx] = this.mergeOrderObjects(_ordersCache[idx], freshDoc);
+            else _ordersCache.unshift(freshDoc);
+          }
+          return freshDoc;
+        }
       } catch (e) {}
     }
     return null;
@@ -356,51 +364,65 @@ export const DBService = {
   // ══════════════════════════════════════════════════════════════════════
 
   async updateOrderStatus(orderId, newStatus, isLocked = null) {
-    // Work directly from in-memory cache
     const orders = _ordersCache || (await this.getOrders());
-    const idx    = orders.findIndex(o => o.id === orderId);
+    const idx    = orders.findIndex(o => o.id === orderId || o.orderId === orderId);
+
+    const updatedAt = new Date().toISOString();
+    let isStatusLocked = isLocked;
+    if (isStatusLocked === null && (newStatus === 'Completed' || newStatus === 'Rejected')) {
+      isStatusLocked = true;
+    }
 
     if (idx !== -1) {
-      orders[idx].status    = newStatus;
-      orders[idx].updatedAt = new Date().toISOString();
-
-      if (isLocked !== null) {
-        orders[idx].isStatusLocked = isLocked;
-      } else if (newStatus === 'Completed' || newStatus === 'Rejected') {
-        orders[idx].isStatusLocked = true;
-      }
+      orders[idx].status      = newStatus;
+      orders[idx].orderStatus = newStatus;
+      orders[idx].updatedAt   = updatedAt;
+      if (isStatusLocked !== null) orders[idx].isStatusLocked = isStatusLocked;
       if (newStatus === 'Payment Approved' && orders[idx].payment) {
         orders[idx].payment.status = 'Verified';
       }
+      _ordersCache = orders;
+    }
 
-      _ordersCache = orders; // keep in-memory up to date
+    // Firestore update payload (supports dot notation)
+    const fsUpdateObj = {
+      status:      newStatus,
+      orderStatus: newStatus,
+      updatedAt
+    };
+    if (isStatusLocked !== null && isStatusLocked !== undefined) fsUpdateObj.isStatusLocked = isStatusLocked;
+    if (newStatus === 'Payment Approved') fsUpdateObj['payment.status'] = 'Verified';
 
-      const updateObj = {
-        status:    newStatus,
-        updatedAt: orders[idx].updatedAt
-      };
-      if (orders[idx].isStatusLocked !== undefined) updateObj.isStatusLocked = orders[idx].isStatusLocked;
-      if (newStatus === 'Payment Approved') updateObj['payment.status'] = 'Verified';
+    // RTDB update payload (slash notation for nested paths)
+    const rtdbUpdateObj = {
+      status:      newStatus,
+      orderStatus: newStatus,
+      updatedAt
+    };
+    if (isStatusLocked !== null && isStatusLocked !== undefined) rtdbUpdateObj.isStatusLocked = isStatusLocked;
+    if (newStatus === 'Payment Approved') rtdbUpdateObj['payment/status'] = 'Verified';
 
-      // Parallel Firebase writes
-      const { db, firebaseApp, isDemo } = svc();
-      if (!isDemo && firebaseApp) {
-        Promise.allSettled([
+    // Parallel Firebase writes
+    const { db, firebaseApp, isDemo } = svc();
+    if (!isDemo && firebaseApp) {
+      try {
+        await Promise.allSettled([
           db ? (async () => {
             const { doc, updateDoc } = await fs();
-            await updateDoc(doc(db, 'orders', orderId), updateObj);
+            await updateDoc(doc(db, 'orders', orderId), fsUpdateObj);
           })() : Promise.resolve(),
           (async () => {
             const { getDatabase, ref, update } = await rtdb();
             const db2 = getDatabase(firebaseApp);
-            await update(ref(db2, 'orders/' + orderId), updateObj);
+            await update(ref(db2, 'orders/' + orderId), rtdbUpdateObj);
           })()
-        ]).catch(e => console.warn('Status sync:', e));
+        ]);
+      } catch (e) {
+        console.warn('Status sync error:', e);
       }
-
-      return orders[idx];
     }
-    return null;
+
+    return idx !== -1 ? orders[idx] : { id: orderId, status: newStatus, orderStatus: newStatus };
   },
 
   // ══════════════════════════════════════════════════════════════════════

@@ -1558,12 +1558,14 @@ export const PublicViews = {
 
     const renderOrderTrackCard = (order) => {
       const isCompleted = order.status === 'Completed';
-      const isReady = order.status === 'Ready for Pickup';
-      const isPrinting = order.status === 'Printing';
-      const isApproved = order.status === 'Payment Approved';
+      const isReady     = order.status === 'Ready for Pickup';
+      const isPrinting  = order.status === 'Printing';
+      const isApproved  = order.status === 'Payment Approved';
+      const isRejected  = order.status === 'Rejected' || order.status === 'Cancelled';
+      const isWaiting   = order.status === 'Waiting Verification' || order.status === 'Pending Payment';
 
       return `
-      <div class="glass-panel" style="padding:2rem; margin-bottom:1.5rem; border-left: 5px solid ${isCompleted ? '#10b981' : isReady ? '#3b82f6' : 'var(--primary)'}; shadow: var(--shadow-md);">
+      <div class="glass-panel" style="padding:2rem; margin-bottom:1.5rem; border-left: 5px solid ${isCompleted ? '#10b981' : isRejected ? '#ef4444' : isReady ? '#3b82f6' : 'var(--primary)'}; shadow: var(--shadow-md);">
         
         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:1rem; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem;">
           <div>
@@ -1584,12 +1586,22 @@ export const PublicViews = {
         <!-- Order Status Progress Flow Visualizer -->
         <div style="margin:1.5rem 0;">
           <h4 style="font-size:0.85rem; font-weight:700; color:var(--text-muted); margin-bottom:0.85rem; text-transform:uppercase; letter-spacing:0.5px;">Order Progression Timeline:</h4>
+          
+          ${isRejected ? `
+            <div style="background:rgba(239,68,68,0.12); border:1.5px solid rgba(239,68,68,0.3); border-radius:10px; padding:1.25rem; display:flex; align-items:center; gap:1rem;">
+              <div style="font-size:2rem;">❌</div>
+              <div>
+                <h4 style="color:#dc2626; margin:0; font-size:1.05rem; font-weight:700;">Order Status: Rejected / Cancelled</h4>
+                <p style="margin:0.25rem 0 0 0; font-size:0.85rem; color:var(--text-muted);">This order was rejected by shop management. Please contact desk support if you have questions.</p>
+              </div>
+            </div>
+          ` : `
           <div class="timeline">
-            <div class="timeline-item ${order.status !== 'Pending Payment' ? 'completed' : 'active'}">
+            <div class="timeline-item ${!isWaiting ? 'completed' : 'active'}">
               <div class="timeline-icon">✓</div>
               <div class="timeline-content">
-                <div style="font-weight:700;">Order Received & Verified</div>
-                <div style="font-size:0.8rem; color:var(--text-muted);">Payment submitted via UPI UTR: <code>${order.payment?.utr || 'N/A'}</code></div>
+                <div style="font-weight:700;">Order Received & Pending Verification</div>
+                <div style="font-size:0.8rem; color:var(--text-muted);">${order.payment?.utr ? `UPI UTR: <code>${order.payment.utr}</code>` : 'Order submitted by customer'}</div>
               </div>
             </div>
 
@@ -1597,7 +1609,7 @@ export const PublicViews = {
               <div class="timeline-icon">${isPrinting ? '🖨️' : '💳'}</div>
               <div class="timeline-content">
                 <div style="font-weight:700;">Payment Approved & Document Printing</div>
-                <div style="font-size:0.8rem; color:var(--text-muted);">${isPrinting ? '🖨️ Currently printing your document packages...' : 'Payment verified by shop desk'}</div>
+                <div style="font-size:0.8rem; color:var(--text-muted);">${isPrinting ? '🖨️ Currently printing document package...' : isApproved ? 'Payment verified by shop desk' : 'Awaiting payment verification'}</div>
               </div>
             </div>
 
@@ -1605,10 +1617,11 @@ export const PublicViews = {
               <div class="timeline-icon">📦</div>
               <div class="timeline-content">
                 <div style="font-weight:700;">${(order.pricing?.deliveryFee && order.pricing.deliveryFee > 0) ? 'Out for Delivery' : 'Ready for Store Pickup'}</div>
-                <div style="font-size:0.8rem; color:var(--text-muted);">${isCompleted ? '✅ Order Completed & Delivered!' : `Est. Ready: ${formatDate(order.estimatedReady)} at ${formatTime(order.estimatedReady)}`}</div>
+                <div style="font-size:0.8rem; color:var(--text-muted);">${isCompleted ? '✅ Order Completed & Delivered!' : isReady ? '📦 Ready at desk for pickup!' : `Est. Ready: ${formatDate(order.estimatedReady)} at ${formatTime(order.estimatedReady)}`}</div>
               </div>
             </div>
           </div>
+          `}
         </div>
 
         <!-- Summary info -->
@@ -1640,7 +1653,15 @@ export const PublicViews = {
         return;
       }
 
-      const results = await DBService.searchOrders(val);
+      // Query Firebase with forceRefresh = true so live updates are fetched
+      let results = await DBService.searchOrders(val, true);
+
+      // Fallback: search by exact ID if searchOrders returns empty
+      if (results.length === 0 && val.toUpperCase().startsWith('ORD-')) {
+        const directDoc = await DBService.getOrderById(val.toUpperCase(), true);
+        if (directDoc) results = [directDoc];
+      }
+
       if (results.length === 0) {
         if (!isSilentUpdate) {
           container.innerHTML = `
