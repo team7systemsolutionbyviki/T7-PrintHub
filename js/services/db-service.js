@@ -4,14 +4,14 @@
    In-memory cache for instant UI — Firebase is the single source of truth
    ========================================================================== */
 
-import { DEFAULT_SETTINGS, DEFAULT_PRICING, DEFAULT_SERVICES, DEFAULT_PRODUCTS } from '../config/default-data.js';
+import { getServices } from '../config/firebase-config.js';
+import { DEFAULT_SETTINGS, DEFAULT_PRICING, DEFAULT_SERVICES } from '../config/default-data.js';
 
 // ── In-memory caches (zero-latency on second access, no localStorage) ───────
 let _ordersCache   = null;   // Array<Order>  | null
 let _settingsCache = null;   // Object        | null
 let _pricingCache  = null;   // Object        | null
 let _catalogCache  = null;   // Array<Service>| null
-let _productsCache = null;   // Array<Product>| null
 let _cloudSyncBusy = false;
 
 // ── Lazy-load Firebase module references (cached by JS engine) ───────────────
@@ -684,100 +684,6 @@ export const DBService = {
       } catch (e) {}
     }
     window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
-    return true;
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  STATIONERY & SALES PRODUCTS (Pens, Pencils, Accessories CRUD)
-  // ══════════════════════════════════════════════════════════════════════
-
-  getProductsCatalogSync() {
-    return _productsCache || DEFAULT_PRODUCTS;
-  },
-
-  async getProductsCatalog() {
-    if (_productsCache) return _productsCache;
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { collection, getDocs } = await fs();
-        const snap = await getDocs(collection(db, 'products'));
-        if (!snap.empty) {
-          _productsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          return _productsCache;
-        }
-      } catch (e) {
-        console.warn('[PRODUCTS] Firestore fetch error:', e);
-      }
-    }
-    // Seed with defaults
-    _productsCache = DEFAULT_PRODUCTS.map(p => ({ category: 'Stationery', status: 'Active', stockStatus: 'In Stock', ...p }));
-    if (!isDemo && db) {
-      (async () => {
-        try {
-          const { doc, setDoc } = await fs();
-          for (const item of _productsCache) {
-            if (item.id) await setDoc(doc(db, 'products', item.id), item);
-          }
-        } catch (e) {}
-      })();
-    }
-    return _productsCache;
-  },
-
-  async saveProductItem(productData) {
-    const products = await this.getProductsCatalog();
-    let targetItem = null;
-
-    if (productData.id) {
-      const idx = products.findIndex(p => p.id === productData.id);
-      if (idx !== -1) {
-        products[idx] = { ...products[idx], ...productData };
-        targetItem = products[idx];
-      }
-    }
-
-    if (!targetItem) {
-      targetItem = {
-        id:          'prod-' + Date.now(),
-        category:    productData.category    || 'Stationery',
-        status:      productData.status      || 'Active',
-        stockStatus: productData.stockStatus || 'In Stock',
-        popular:     !!productData.popular,
-        icon:        productData.icon        || '🖊️',
-        ...productData
-      };
-      products.unshift(targetItem);
-    }
-
-    _productsCache = products;
-
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, setDoc } = await fs();
-        await setDoc(doc(db, 'products', targetItem.id), targetItem);
-      } catch (e) {
-        console.warn('[PRODUCTS] Save error:', e);
-      }
-    }
-    window.dispatchEvent(new CustomEvent('productsUpdated', { detail: _productsCache }));
-    return targetItem;
-  },
-
-  async deleteProductItem(productId) {
-    const products = await this.getProductsCatalog();
-    _productsCache = products.filter(p => p.id !== productId);
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, deleteDoc } = await fs();
-        await deleteDoc(doc(db, 'products', productId));
-      } catch (e) {
-        console.warn('[PRODUCTS] Delete error:', e);
-      }
-    }
-    window.dispatchEvent(new CustomEvent('productsUpdated', { detail: _productsCache }));
     return true;
   }
 };
