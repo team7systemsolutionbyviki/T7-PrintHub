@@ -37,62 +37,65 @@ window.updateFloatingButtons = async () => {
   }
 };
 
-const initApp = async () => {
-  // ── Step 1: Start Firebase parallel SDK load immediately ──────────────────
-  const firebaseReady = initFirebase();
+const initApp = () => {
+  try {
+    // ── Step 1: Register all SPA routes IMMEDIATELY for instant UI rendering ──
+    Router.register('home',        (q) => { NavbarComponent.render(); PublicViews.renderHome(q);      window.updateFloatingButtons(); });
+    Router.register('services',    (q) => { NavbarComponent.render(); PublicViews.renderServices(q);  window.updateFloatingButtons(); });
+    Router.register('pricing',     (q) => { NavbarComponent.render(); PublicViews.renderPriceList(q); window.updateFloatingButtons(); });
+    Router.register('how-it-works', async (q) => {
+      NavbarComponent.render();
+      await PublicViews.renderHome(q);
+      setTimeout(() => {
+        const el = document.getElementById('how-it-works-section');
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      }, 80);
+      window.updateFloatingButtons();
+    });
+    Router.register('faq',     (q) => { NavbarComponent.render(); PublicViews.renderFAQ(q);         window.updateFloatingButtons(); });
+    Router.register('order',   (q) => { NavbarComponent.render(); PublicViews.renderOrderPrint(q);  window.updateFloatingButtons(); });
+    Router.register('track',   (q) => { NavbarComponent.render(); PublicViews.renderTrackOrder(q);  window.updateFloatingButtons(); });
+    Router.register('contact', (q) => { NavbarComponent.render(); PublicViews.renderContact(q);     window.updateFloatingButtons(); });
 
-  // ── Step 2: Wait for Firebase to be ready, then warm up all caches ────────
-  await firebaseReady;
+    // Admin Routes
+    Router.register('admin-login',        (q) => { NavbarComponent.render(); AdminViews.renderLogin(q); });
+    Router.register('admin-dashboard',    (q) => { AdminViews.renderDashboard(q); });
+    Router.register('admin-orders',       (q) => { AdminViews.renderOrders(q); });
+    Router.register('admin-pricing',      (q) => { AdminViews.renderPricing(q); });
+    Router.register('admin-catalog',      (q) => { AdminViews.renderCatalog(q); });
+    Router.register('admin-customers',    (q) => { AdminViews.renderCustomers(q); });
+    Router.register('admin-reports',      (q) => { AdminViews.renderReports(q); });
+    Router.register('admin-settings',     (q) => { AdminViews.renderSettings(q); });
 
-  // Pre-fetch Settings, Orders, and Pricing from Firebase in parallel
-  await Promise.allSettled([
-    DBService.getSettings(),
-    DBService.getOrders(),
-    PricingEngine.preload(DBService)   // primes the synchronous getPricingData() cache
-  ]);
+    // Customer Route
+    Router.register('customer-dashboard', (q) => { NavbarComponent.render(); CustomerViews.renderCustomerDashboard(q); });
 
-  // ── Step 3: Register I18n change listener ─────────────────────────────────
-  I18nService.onChange(() => {
-    NavbarComponent.render();
-    Router.handleRoute();
-  });
+    // ── Step 2: Register I18n change listener ─────────────────────────────────
+    I18nService.onChange(() => {
+      NavbarComponent.render();
+      Router.handleRoute();
+    });
 
-  // Update floating buttons (uses cached settings)
-  window.updateFloatingButtons();
-
-  // ── Step 4: Register all SPA routes ──────────────────────────────────────
-  Router.register('home',        (q) => { NavbarComponent.render(); PublicViews.renderHome(q);      window.updateFloatingButtons(); });
-  Router.register('services',    (q) => { NavbarComponent.render(); PublicViews.renderServices(q);  window.updateFloatingButtons(); });
-  Router.register('pricing',     (q) => { NavbarComponent.render(); PublicViews.renderPriceList(q); window.updateFloatingButtons(); });
-  Router.register('how-it-works', async (q) => {
-    NavbarComponent.render();
-    await PublicViews.renderHome(q);
-    setTimeout(() => {
-      const el = document.getElementById('how-it-works-section');
-      if (el) el.scrollIntoView({ behavior: 'smooth' });
-    }, 80);
+    // ── Step 3: Start router FIRST so page content renders in < 1ms ──────────
+    Router.init();
     window.updateFloatingButtons();
-  });
-  Router.register('faq',     (q) => { NavbarComponent.render(); PublicViews.renderFAQ(q);         window.updateFloatingButtons(); });
-  Router.register('order',   (q) => { NavbarComponent.render(); PublicViews.renderOrderPrint(q);  window.updateFloatingButtons(); });
-  Router.register('track',   (q) => { NavbarComponent.render(); PublicViews.renderTrackOrder(q);  window.updateFloatingButtons(); });
-  Router.register('contact', (q) => { NavbarComponent.render(); PublicViews.renderContact(q);     window.updateFloatingButtons(); });
 
-  // Admin Routes
-  Router.register('admin-login',        (q) => { NavbarComponent.render(); AdminViews.renderLogin(q); });
-  Router.register('admin-dashboard',    (q) => { AdminViews.renderDashboard(q); });
-  Router.register('admin-orders',       (q) => { AdminViews.renderOrders(q); });
-  Router.register('admin-pricing',      (q) => { AdminViews.renderPricing(q); });
-  Router.register('admin-catalog',      (q) => { AdminViews.renderCatalog(q); });
-  Router.register('admin-customers',    (q) => { AdminViews.renderCustomers(q); });
-  Router.register('admin-reports',      (q) => { AdminViews.renderReports(q); });
-  Router.register('admin-settings',     (q) => { AdminViews.renderSettings(q); });
+    // ── Step 4: Background parallel Firebase load (non-blocking) ──────────────
+    initFirebase().then(() => {
+      Promise.allSettled([
+        DBService.getSettings(),
+        DBService.getOrders(),
+        PricingEngine.preload(DBService)
+      ]).then(() => {
+        NavbarComponent.render();
+        window.updateFloatingButtons();
+      });
+    }).catch(err => console.warn('Deferred Firebase init:', err));
 
-  // Customer Route
-  Router.register('customer-dashboard', (q) => { NavbarComponent.render(); CustomerViews.renderCustomerDashboard(q); });
-
-  // ── Step 5: Start router (renders from in-memory cache — fast) ────────────
-  Router.init();
+  } catch (err) {
+    console.error('App init error:', err);
+    try { Router.init(); } catch (e) {}
+  }
 };
 
 if (document.readyState === 'loading') {

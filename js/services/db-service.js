@@ -39,6 +39,10 @@ export const DBService = {
   //  SETTINGS
   // ══════════════════════════════════════════════════════════════════════
 
+  getSettingsSync() {
+    return _settingsCache || DEFAULT_SETTINGS;
+  },
+
   async getSettings() {
     // 1. Return in-memory cache immediately (< 1ms)
     if (_settingsCache) return _settingsCache;
@@ -504,6 +508,10 @@ export const DBService = {
   // ══════════════════════════════════════════════════════════════════════
   //  SERVICE CATALOG — Firestore backed, memory cached
   // ══════════════════════════════════════════════════════════════════════
+
+  getServicesCatalogSync() {
+    return _catalogCache || DEFAULT_SERVICES;
+  },
 
   async getServicesCatalog() {
     if (_catalogCache) return _catalogCache;

@@ -9,7 +9,7 @@ import { I18nService } from '../services/i18n-service.js';
 export const NavbarComponent = {
   async render() {
     const user = AuthService.getCurrentUser();
-    const settings = await DBService.getSettings();
+    const settings = DBService.getSettingsSync();
     const currentTheme = localStorage.getItem('team7_theme') || 'light';
     document.documentElement.setAttribute('data-theme', currentTheme);
 

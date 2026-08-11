@@ -2,7 +2,7 @@
    TEAM 7 SYSTEM SOLUTION - SERVICE WORKER
    ========================================================================== */
 
-const CACHE_NAME = 'team7-print-v3';
+const CACHE_NAME = 'team7-print-v4';
 
 // URLs that must NEVER be intercepted by the Service Worker (causes CORS failures)
 const BYPASS_ORIGINS = [
@@ -41,12 +41,25 @@ self.addEventListener('fetch', (event) => {
   // Let Firebase/external requests pass through completely — never cache or intercept
   const isBypass = BYPASS_ORIGINS.some(origin => url.hostname.includes(origin));
   if (isBypass || event.request.method !== 'GET') {
-    // Do NOT call event.respondWith() — browser handles it natively without CORS issues
     return;
   }
 
-  // For local app assets: network first, cache fallback
+  // Only handle http/https GET requests
+  if (!url.protocol.startsWith('http')) return;
+
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    fetch(event.request).then(response => {
+      if (response && response.status === 200 && response.type === 'basic') {
+        const responseToCache = response.clone();
+        caches.open(CACHE_NAME).then(cache => {
+          cache.put(event.request, responseToCache);
+        }).catch(() => {});
+      }
+      return response;
+    }).catch(async () => {
+      const cached = await caches.match(event.request);
+      if (cached) return cached;
+      return new Response('', { status: 404, statusText: 'Not Found' });
+    })
   );
 });

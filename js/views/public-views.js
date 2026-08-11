@@ -14,9 +14,13 @@ import { formatCurrency, getStatusBadgeHTML, formatDate, formatTime } from '../u
 export const PublicViews = {
   // --- HOME PAGE ---
   async renderHome() {
-    const settings = await DBService.getSettings();
+    const settings = DBService.getSettingsSync();
     const pricing = PricingEngine.getPricingData();
+    const catalog = DBService.getServicesCatalogSync();
+    const activeServices = (catalog || []).filter(s => s.status !== 'Inactive');
+    const displayServices = activeServices.length > 0 ? activeServices : DEFAULT_SERVICES;
     const app = document.getElementById('app-content');
+    if (!app) return;
 
     app.innerHTML = `
       <!-- Hero Section -->
@@ -123,13 +127,7 @@ export const PublicViews = {
           </div>
 
           <div class="services-grid">
-            ${(await (async () => {
-              try {
-                const cat = await DBService.getServicesCatalog();
-                const active = (cat || []).filter(s => s.status !== 'Inactive');
-                return active.length > 0 ? active : DEFAULT_SERVICES;
-              } catch(e) { return DEFAULT_SERVICES; }
-            })()).map(s => `
+            ${displayServices.map(s => `
               <div class="service-card">
                 <div class="service-icon">${s.icon || '📄'}</div>
                 <h3 style="margin-bottom: 0.5rem;">${s.title}</h3>
@@ -271,7 +269,7 @@ export const PublicViews = {
 
   // --- SERVICES PAGE ---
   async renderServices() {
-    const catalog = await DBService.getServicesCatalog();
+    const catalog = DBService.getServicesCatalogSync();
     const activeServices = catalog.filter(s => s.status !== 'Inactive');
     const isAdmin = AuthService.isAdmin();
 
@@ -381,7 +379,7 @@ export const PublicViews = {
 
   // --- ORDER PRINT WIZARD PAGE ---
   async renderOrderPrint() {
-    const settings = await DBService.getSettings();
+    const settings = DBService.getSettingsSync();
     const pricing = PricingEngine.getPricingData();
     const app = document.getElementById('app-content');
 
@@ -1737,7 +1735,7 @@ export const PublicViews = {
 
   // --- CONTACT PAGE ---
   async renderContact() {
-    const settings = await DBService.getSettings();
+    const settings = DBService.getSettingsSync();
     const app = document.getElementById('app-content');
     app.innerHTML = `
       <section style="padding: 4rem 0;">
