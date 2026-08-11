@@ -57,14 +57,16 @@ export const DBService = {
     return { ...DEFAULT_SETTINGS };
   },
 
-  // Async getter — fetches directly from Firestore server, bypasses local cache.
-  // forceRefresh=true clears in-memory cache before fetching.
+  // Async getter — fetches directly from Firestore SERVER, bypasses local SDK cache.
+  // forceRefresh=true (used at startup) clears in-memory cache so Firebase is always queried.
+  // NEVER call this after getSettingsSync() has been called for first-render — use getSettingsSync()
+  // only after _settingsCache has been warmed by this function.
   async getSettings(forceRefresh = false) {
     if (forceRefresh) {
       _settingsCache = null;
     }
 
-    // Return in-memory cache only if it was populated from Firebase (not defaults)
+    // Return in-memory cache if it was already populated from Firebase
     if (_settingsCache) {
       console.log('[SETTINGS] SOURCE: CACHE', _settingsCache);
       return { ...DEFAULT_SETTINGS, ..._settingsCache };
@@ -72,22 +74,15 @@ export const DBService = {
 
     const { db, isDemo } = svc();
 
-    // Fetch directly from Firestore server — always gets latest data
+    // Fetch from Firestore — use source:'server' to bypass Firestore's own local cache
     if (!isDemo && db) {
       try {
         const { doc, getDoc } = await fs();
-        // { source: 'server' } bypasses Firestore's local cache entirely
-        let snap;
-        try {
-          const { getDocFromServer } = await fs();
-          snap = await getDocFromServer(doc(db, 'settings', 'general'));
-        } catch {
-          // Fallback if getDocFromServer not available in this SDK build
-          snap = await getDoc(doc(db, 'settings', 'general'));
-        }
+        const docRef = doc(db, 'settings', 'general');
+        // source:'server' forces a network round-trip, ignoring Firestore's memory/IndexedDB cache
+        const snap = await getDoc(docRef, { source: 'server' }).catch(() => getDoc(docRef));
 
         if (snap && snap.exists()) {
-          // Firebase data always wins — merge on top of defaults
           _settingsCache = { ...DEFAULT_SETTINGS, ...snap.data() };
           console.log('[SETTINGS] SOURCE: FIREBASE', snap.data());
           console.log('[SETTINGS] FINAL', _settingsCache);
@@ -98,11 +93,9 @@ export const DBService = {
       }
     }
 
-    // Absolute last resort — no Firebase connection
-    if (!_settingsCache) {
-      _settingsCache = { ...DEFAULT_SETTINGS };
-    }
-    console.log('[SETTINGS] SOURCE: DEFAULT', DEFAULT_SETTINGS);
+    // Last resort fallback — Firebase unavailable (no connection, demo mode, etc.)
+    _settingsCache = { ...DEFAULT_SETTINGS };
+    console.log('[SETTINGS] SOURCE: DEFAULT (Firebase unavailable)', DEFAULT_SETTINGS);
     console.log('[SETTINGS] FINAL', _settingsCache);
     return _settingsCache;
   },
