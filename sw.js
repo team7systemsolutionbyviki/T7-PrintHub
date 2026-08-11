@@ -1,10 +1,11 @@
 /* ==========================================================================
-   TEAM 7 SYSTEM SOLUTION - SERVICE WORKER
+   T7-PRINT HUB - SERVICE WORKER
+   Cache Version: v5
    ========================================================================== */
 
-const CACHE_NAME = 'team7-print-v4';
+const CACHE_NAME = 't7-printhub-v5';
 
-// URLs that must NEVER be intercepted by the Service Worker (causes CORS failures)
+// Firebase and external services that must NEVER be intercepted
 const BYPASS_ORIGINS = [
   'firebasestorage.googleapis.com',
   'firestore.googleapis.com',
@@ -14,52 +15,122 @@ const BYPASS_ORIGINS = [
   'googleapis.com',
   'gstatic.com',
   'firebaseio.com',
-  'firebase.com',
+  'firebase.com'
 ];
 
+// INSTALL
 self.addEventListener('install', (event) => {
+  console.log('[SW] Installing T7-PrintHub v5');
+
   self.skipWaiting();
 });
 
+// ACTIVATE
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches.keys()
+      .then((keys) => {
+        return Promise.all(
+          keys.map((key) => {
+            if (key !== CACHE_NAME) {
+              console.log('[SW] Deleting old cache:', key);
+              return caches.delete(key);
+            }
+            return null;
+          })
+        );
+      })
+      .then(() => self.clients.claim())
   );
 });
 
+// FETCH
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  const request = event.request;
+  const url = new URL(request.url);
 
-  // Let Firebase/external requests pass through completely — never cache or intercept
-  const isBypass = BYPASS_ORIGINS.some(origin => url.hostname.includes(origin));
-  if (isBypass || event.request.method !== 'GET') {
+  // Only handle HTTP/HTTPS GET requests
+  if (
+    request.method !== 'GET' ||
+    !url.protocol.startsWith('http')
+  ) {
     return;
   }
 
-  // Only handle http/https GET requests
-  if (!url.protocol.startsWith('http')) return;
+  // Never intercept Firebase / Google API requests
+  const isBypass = BYPASS_ORIGINS.some((origin) =>
+    url.hostname.includes(origin)
+  );
 
+  if (isBypass) {
+    return;
+  }
+
+  /*
+   * IMPORTANT:
+   * Always get HTML/navigation requests from the network first.
+   * This prevents old website branding from being served from cache.
+   */
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request, { cache: 'no-store' })
+        .then((response) => {
+          return response;
+        })
+        .catch(async () => {
+          const cached = await caches.match(request);
+
+          if (cached) {
+            return cached;
+          }
+
+          return new Response(
+            'Offline - Please check your internet connection.',
+            {
+              status: 503,
+              headers: {
+                'Content-Type': 'text/plain'
+              }
+            }
+          );
+        })
+    );
+
+    return;
+  }
+
+  /*
+   * For CSS, JS, images and other files:
+   * Network first → cache fallback.
+   */
   event.respondWith(
-    fetch(event.request).then(response => {
-      if (response && response.status === 200 && response.type === 'basic') {
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(event.request, responseToCache);
-        }).catch(() => {});
-      }
-      return response;
-    }).catch(async () => {
-      const cached = await caches.match(event.request);
-      if (cached) return cached;
-      return new Response('', { status: 404, statusText: 'Not Found' });
-    })
+    fetch(request)
+      .then((response) => {
+        if (
+          response &&
+          response.status === 200 &&
+          response.type === 'basic'
+        ) {
+          const responseToCache = response.clone();
+
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(request, responseToCache);
+          }).catch(() => { });
+        }
+
+        return response;
+      })
+      .catch(async () => {
+        const cached = await caches.match(request);
+
+        if (cached) {
+          return cached;
+        }
+
+        return new Response('', {
+          status: 404,
+          statusText: 'Not Found'
+        });
+      })
   );
 });
