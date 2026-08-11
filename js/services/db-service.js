@@ -37,104 +37,155 @@ export const DBService = {
 
   // ══════════════════════════════════════════════════════════════════════
   //  SETTINGS — Single source of truth: Firestore settings/general
-  //  Firebase values always override defaults.
-  //  DEFAULT_SETTINGS is a fallback only — never overwrites Firebase data.
+  //  Priority: Firebase server data > in-memory cache > DEFAULT_SETTINGS
+  //  DEFAULT_SETTINGS is a fallback ONLY — never overwrites Firebase data.
   // ══════════════════════════════════════════════════════════════════════
 
-  // Synchronous getter for instant first-paint rendering.
-  // Returns Firebase cache merged on top of defaults so all fields are present.
+  // Singleton guard — prevents duplicate onSnapshot listeners
+  _settingsUnsubscribe: null,
+
+  // Synchronous getter for instant first-paint rendering (< 1ms).
+  // Uses cached data if available, otherwise falls back to defaults.
+  // Views that call this MUST handle the settingsUpdated event to re-render
+  // with fresh Firebase data when the snapshot arrives.
   getSettingsSync() {
     if (_settingsCache) {
-      // Merge: DEFAULT_SETTINGS fills any missing keys; Firebase cache overrides all
+      console.log('[SETTINGS] SOURCE: CACHE', _settingsCache);
       return { ...DEFAULT_SETTINGS, ..._settingsCache };
     }
+    console.log('[SETTINGS] SOURCE: DEFAULT', DEFAULT_SETTINGS);
     return { ...DEFAULT_SETTINGS };
   },
 
-  // Async getter — fetches from Firestore once, caches in memory.
-  // Firebase data is always merged on top of DEFAULT_SETTINGS.
-  async getSettings() {
-    // 1. Return in-memory cache immediately (< 1ms)
+  // Async getter — fetches directly from Firestore server, bypasses local cache.
+  // forceRefresh=true clears in-memory cache before fetching.
+  async getSettings(forceRefresh = false) {
+    if (forceRefresh) {
+      _settingsCache = null;
+    }
+
+    // Return in-memory cache only if it was populated from Firebase (not defaults)
     if (_settingsCache) {
+      console.log('[SETTINGS] SOURCE: CACHE', _settingsCache);
       return { ...DEFAULT_SETTINGS, ..._settingsCache };
     }
 
     const { db, isDemo } = svc();
 
-    // 2. Fetch from Firestore — Firebase values override defaults
+    // Fetch directly from Firestore server — always gets latest data
     if (!isDemo && db) {
       try {
         const { doc, getDoc } = await fs();
-        const snap = await getDoc(doc(db, 'settings', 'general'));
-        if (snap.exists()) {
-          // Merge Firebase data on top of defaults — Firebase always wins
+        // { source: 'server' } bypasses Firestore's local cache entirely
+        let snap;
+        try {
+          const { getDocFromServer } = await fs();
+          snap = await getDocFromServer(doc(db, 'settings', 'general'));
+        } catch {
+          // Fallback if getDocFromServer not available in this SDK build
+          snap = await getDoc(doc(db, 'settings', 'general'));
+        }
+
+        if (snap && snap.exists()) {
+          // Firebase data always wins — merge on top of defaults
           _settingsCache = { ...DEFAULT_SETTINGS, ...snap.data() };
-          console.log('[SHOP SETTINGS] Loaded from Firebase:', _settingsCache);
+          console.log('[SETTINGS] SOURCE: FIREBASE', snap.data());
+          console.log('[SETTINGS] FINAL', _settingsCache);
           return _settingsCache;
         }
       } catch (e) {
-        console.warn('[SHOP SETTINGS] Firestore fetch error:', e);
+        console.warn('[SETTINGS] Firestore fetch error:', e);
       }
     }
 
-    // 3. Nothing in Firebase yet — seed Firebase with defaults
-    _settingsCache = { ...DEFAULT_SETTINGS };
-    console.log('[SHOP SETTINGS] No Firebase data found, using defaults:', _settingsCache);
-    if (!isDemo && db) {
-      (async () => {
-        try {
-          const { doc, setDoc } = await fs();
-          await setDoc(doc(db, 'settings', 'general'), _settingsCache, { merge: true });
-        } catch (e) {}
-      })();
+    // Absolute last resort — no Firebase connection
+    if (!_settingsCache) {
+      _settingsCache = { ...DEFAULT_SETTINGS };
     }
+    console.log('[SETTINGS] SOURCE: DEFAULT', DEFAULT_SETTINGS);
+    console.log('[SETTINGS] FINAL', _settingsCache);
     return _settingsCache;
   },
 
-  // Save ALL settings fields to Firestore using { merge: true } so no existing
-  // Firestore fields (e.g. socialLinks, businessHours) are deleted.
+  // Save ALL settings to Firestore with { merge: true }.
+  // After saving: clears cache, then lets onSnapshot repopulate from server.
   async saveSettings(settings) {
-    // Merge new values on top of existing cache so we never lose fields
-    _settingsCache = { ...DEFAULT_SETTINGS, ..._settingsCache, ...settings };
     const { db, isDemo } = svc();
+
+    // Build the merged settings object (new values win)
+    const merged = { ...DEFAULT_SETTINGS, ..._settingsCache, ...settings };
+
     if (!isDemo && db) {
       try {
         const { doc, setDoc } = await fs();
-        // CRITICAL: { merge: true } prevents deleting Firestore fields not in this save
-        await setDoc(doc(db, 'settings', 'general'), _settingsCache, { merge: true });
-        console.log('[SHOP SETTINGS] Saved to Firebase:', _settingsCache);
+        // { merge: true } prevents deleting any existing Firestore fields
+        await setDoc(doc(db, 'settings', 'general'), merged, { merge: true });
+        console.log('[SETTINGS] Saved to Firebase:', merged);
       } catch (e) {
-        console.warn('[SHOP SETTINGS] Save error:', e);
-        throw e; // Re-throw so caller can show an error toast
+        console.warn('[SETTINGS] Save error:', e);
+        throw e;
       }
     }
-    // Notify all public pages and components to refresh with new settings
+
+    // Update in-memory cache with the freshly saved values
+    _settingsCache = merged;
+
+    // Notify all pages/components of the update
     window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: _settingsCache }));
     return _settingsCache;
   },
 
-  // Real-time Firestore listener — keeps _settingsCache live.
-  // Call once after Firebase is initialized. Automatically re-renders public pages
-  // when admin saves new settings (via Firebase → onSnapshot → settingsUpdated event).
+  // Real-time Firestore listener — SINGLETON. Only ONE listener ever exists.
+  // Fires ONLY for server-confirmed data (ignores fromCache snapshots) so
+  // there is no race between old local-cache data and fresh server data.
   async onSettingsSnapshot(callback) {
+    // Unsubscribe any existing listener before creating a new one (singleton pattern)
+    if (this._settingsUnsubscribe) {
+      try { this._settingsUnsubscribe(); } catch (e) {}
+      this._settingsUnsubscribe = null;
+    }
+
     const { db, isDemo } = svc();
     if (isDemo || !db) return null;
+
     try {
       const { doc, onSnapshot } = await fs();
       const settingsRef = doc(db, 'settings', 'general');
-      const unsubscribe = onSnapshot(settingsRef, (snap) => {
-        if (snap.exists()) {
-          _settingsCache = { ...DEFAULT_SETTINGS, ...snap.data() };
-          console.log('[SHOP SETTINGS] Real-time update received:', _settingsCache);
+
+      this._settingsUnsubscribe = onSnapshot(
+        settingsRef,
+        { includeMetadataChanges: true }, // Required to check fromCache flag
+        (snap) => {
+          // CRITICAL: Skip snapshots served from Firestore's local cache.
+          // Only accept confirmed server data to prevent alternating old/new values.
+          if (snap.metadata.fromCache) {
+            console.log('[SETTINGS] Skipping cached snapshot (waiting for server data)');
+            return;
+          }
+
+          if (!snap.exists()) {
+            console.log('[SETTINGS] No settings document in Firestore');
+            return;
+          }
+
+          // Server-confirmed data — always overrides defaults
+          const serverData = snap.data();
+          _settingsCache = { ...DEFAULT_SETTINGS, ...serverData };
+
+          console.log('[SETTINGS] SOURCE: FIREBASE (real-time server)', serverData);
+          console.log('[SETTINGS] FINAL', _settingsCache);
+
           window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: _settingsCache }));
           if (typeof callback === 'function') callback(_settingsCache);
+        },
+        (err) => {
+          console.warn('[SETTINGS] Snapshot listener error:', err);
         }
-      }, (err) => {
-        console.warn('[SHOP SETTINGS] Snapshot listener error:', err);
-      });
-      return unsubscribe;
+      );
+
+      return this._settingsUnsubscribe;
     } catch (e) {
-      console.warn('[SHOP SETTINGS] Could not start snapshot listener:', e);
+      console.warn('[SETTINGS] Could not start snapshot listener:', e);
       return null;
     }
   },

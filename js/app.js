@@ -20,20 +20,23 @@ window.NotificationService = NotificationService;
 window.I18nService = I18nService;
 
 // ── Floating buttons ──────────────────────────────────────────────────────────
-window.updateFloatingButtons = async () => {
+// Uses getSettingsSync() since this is only called:
+// (a) synchronously at startup (cache = defaults, OK)
+// (b) from settingsUpdated event (cache = Firebase server data, correct)
+window.updateFloatingButtons = () => {
   try {
-    const settings = await DBService.getSettings();
-    const rawWa   = (settings.whatsappNumber || settings.phone || '919789123456').replace(/\D/g, '');
+    const settings = DBService.getSettingsSync();
+    const rawWa   = (settings.whatsappNumber || settings.phone || '').replace(/\D/g, '');
     const cleanWa = rawWa.length === 10 ? '91' + rawWa : rawWa;
     const waBtn   = document.getElementById('floating-whatsapp-btn');
-    if (waBtn) waBtn.href = `https://wa.me/${cleanWa}?text=${encodeURIComponent(`Hi ${settings.shopName || 'TEAM 7 SYSTEM SOLUTION'}! I have a printing inquiry.`)}`;
+    if (waBtn && cleanWa) waBtn.href = `https://wa.me/${cleanWa}?text=${encodeURIComponent(`Hi ${settings.shopName}! I have a printing inquiry.`)}`;
 
-    const rawPhone  = (settings.phone || '9789123456').replace(/\D/g, '');
-    const cleanCall = rawPhone.length === 10 ? '+91' + rawPhone : '+' + rawPhone;
+    const rawPhone  = (settings.phone || '').replace(/\D/g, '');
+    const cleanCall = rawPhone.length === 10 ? '+91' + rawPhone : (rawPhone ? '+' + rawPhone : '');
     const callBtn   = document.getElementById('floating-call-btn');
-    if (callBtn) callBtn.href = `tel:${cleanCall}`;
+    if (callBtn && cleanCall) callBtn.href = `tel:${cleanCall}`;
   } catch (e) {
-    console.warn('updateFloatingButtons:', e);
+    console.warn('[App] updateFloatingButtons:', e);
   }
 };
 
