@@ -24,22 +24,41 @@ export const NavbarComponent = {
     const brandLogoText = (settings.shopName || 'SHOP').slice(0, 2).toUpperCase();
     const brandName = settings.shopName || 'TEAM 7 SYSTEM SOLUTION';
 
-    // Update Footer Brand & Document Title & Footer Text dynamically
-    const footerBrand = document.querySelector('.footer-brand');
-    if (footerBrand && settings.shopName) {
-      footerBrand.innerHTML = `<span style="color:var(--primary);">${settings.shopName}</span>`;
+    // Update Footer Brand, Contact Info, Copyright & Document Title from settings
+    const footerBrand = document.getElementById('footer-brand');
+    if (footerBrand) {
+      footerBrand.innerHTML = `<span style="color:var(--primary);">${settings.shopName || 'Print Hub'}</span>`;
     }
     if (settings.shopName) {
       document.title = `${settings.shopName} | Online Document Printing & Management`;
     }
+
+    // Footer phone link
+    const footerPhone = document.getElementById('footer-phone');
+    if (footerPhone && settings.phone) {
+      const rawPhone = settings.phone.replace(/\D/g, '');
+      const telLink = rawPhone.length === 10 ? '+91' + rawPhone : '+' + rawPhone;
+      footerPhone.href = `tel:${telLink}`;
+      footerPhone.textContent = `📞 ${settings.phone}`;
+    }
+
+    // Footer email link
+    const footerEmail = document.getElementById('footer-email');
+    if (footerEmail && settings.email) {
+      footerEmail.href = `mailto:${settings.email}`;
+      footerEmail.textContent = `✉️ ${settings.email}`;
+    }
+
+    // Footer copyright
+    const footerCopyright = document.getElementById('footer-copyright');
+    if (footerCopyright) {
+      footerCopyright.textContent = `© 2026 ${settings.shopName || 'Print Hub'}. ${I18nService.t('footer_copyright')}`;
+    }
+
     const footerTitles = document.querySelectorAll('.footer-title');
     if (footerTitles.length >= 2) {
       footerTitles[0].innerText = I18nService.t('footer_quick_links');
       footerTitles[1].innerText = I18nService.t('nav_faq');
-    }
-    const footerCopyright = document.querySelector('.footer-bottom div:first-child');
-    if (footerCopyright) {
-      footerCopyright.innerText = `© 2026 ${settings.shopName || 'TEAM 7 SYSTEM SOLUTION'}. ${I18nService.t('footer_copyright')}`;
     }
 
     const activeLang = I18nService.getCurrentLanguageInfo();

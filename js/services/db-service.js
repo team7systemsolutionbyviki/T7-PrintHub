@@ -36,60 +36,107 @@ export const DBService = {
   initLocalStore() {},
 
   // ══════════════════════════════════════════════════════════════════════
-  //  SETTINGS
+  //  SETTINGS — Single source of truth: Firestore settings/general
+  //  Firebase values always override defaults.
+  //  DEFAULT_SETTINGS is a fallback only — never overwrites Firebase data.
   // ══════════════════════════════════════════════════════════════════════
 
+  // Synchronous getter for instant first-paint rendering.
+  // Returns Firebase cache merged on top of defaults so all fields are present.
   getSettingsSync() {
-    return _settingsCache || DEFAULT_SETTINGS;
+    if (_settingsCache) {
+      // Merge: DEFAULT_SETTINGS fills any missing keys; Firebase cache overrides all
+      return { ...DEFAULT_SETTINGS, ..._settingsCache };
+    }
+    return { ...DEFAULT_SETTINGS };
   },
 
+  // Async getter — fetches from Firestore once, caches in memory.
+  // Firebase data is always merged on top of DEFAULT_SETTINGS.
   async getSettings() {
     // 1. Return in-memory cache immediately (< 1ms)
-    if (_settingsCache) return _settingsCache;
+    if (_settingsCache) {
+      return { ...DEFAULT_SETTINGS, ..._settingsCache };
+    }
 
     const { db, isDemo } = svc();
 
-    // 2. Fetch from Firestore
+    // 2. Fetch from Firestore — Firebase values override defaults
     if (!isDemo && db) {
       try {
         const { doc, getDoc } = await fs();
         const snap = await getDoc(doc(db, 'settings', 'general'));
         if (snap.exists()) {
-          _settingsCache = snap.data();
+          // Merge Firebase data on top of defaults — Firebase always wins
+          _settingsCache = { ...DEFAULT_SETTINGS, ...snap.data() };
+          console.log('[SHOP SETTINGS] Loaded from Firebase:', _settingsCache);
           return _settingsCache;
         }
       } catch (e) {
-        console.warn('Firestore settings fetch:', e);
+        console.warn('[SHOP SETTINGS] Firestore fetch error:', e);
       }
     }
 
-    // 3. Nothing in Firebase yet — use defaults (and seed Firebase)
+    // 3. Nothing in Firebase yet — seed Firebase with defaults
     _settingsCache = { ...DEFAULT_SETTINGS };
+    console.log('[SHOP SETTINGS] No Firebase data found, using defaults:', _settingsCache);
     if (!isDemo && db) {
       (async () => {
         try {
           const { doc, setDoc } = await fs();
-          await setDoc(doc(db, 'settings', 'general'), _settingsCache);
+          await setDoc(doc(db, 'settings', 'general'), _settingsCache, { merge: true });
         } catch (e) {}
       })();
     }
     return _settingsCache;
   },
 
+  // Save ALL settings fields to Firestore using { merge: true } so no existing
+  // Firestore fields (e.g. socialLinks, businessHours) are deleted.
   async saveSettings(settings) {
-    _settingsCache = { ...settings };
+    // Merge new values on top of existing cache so we never lose fields
+    _settingsCache = { ...DEFAULT_SETTINGS, ..._settingsCache, ...settings };
     const { db, isDemo } = svc();
     if (!isDemo && db) {
       try {
         const { doc, setDoc } = await fs();
-        await setDoc(doc(db, 'settings', 'general'), settings);
+        // CRITICAL: { merge: true } prevents deleting Firestore fields not in this save
+        await setDoc(doc(db, 'settings', 'general'), _settingsCache, { merge: true });
+        console.log('[SHOP SETTINGS] Saved to Firebase:', _settingsCache);
       } catch (e) {
-        console.warn('Save settings error:', e);
+        console.warn('[SHOP SETTINGS] Save error:', e);
+        throw e; // Re-throw so caller can show an error toast
       }
     }
-    // Notify the app that settings changed so public pages can re-render with fresh data
+    // Notify all public pages and components to refresh with new settings
     window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: _settingsCache }));
-    return true;
+    return _settingsCache;
+  },
+
+  // Real-time Firestore listener — keeps _settingsCache live.
+  // Call once after Firebase is initialized. Automatically re-renders public pages
+  // when admin saves new settings (via Firebase → onSnapshot → settingsUpdated event).
+  async onSettingsSnapshot(callback) {
+    const { db, isDemo } = svc();
+    if (isDemo || !db) return null;
+    try {
+      const { doc, onSnapshot } = await fs();
+      const settingsRef = doc(db, 'settings', 'general');
+      const unsubscribe = onSnapshot(settingsRef, (snap) => {
+        if (snap.exists()) {
+          _settingsCache = { ...DEFAULT_SETTINGS, ...snap.data() };
+          console.log('[SHOP SETTINGS] Real-time update received:', _settingsCache);
+          window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: _settingsCache }));
+          if (typeof callback === 'function') callback(_settingsCache);
+        }
+      }, (err) => {
+        console.warn('[SHOP SETTINGS] Snapshot listener error:', err);
+      });
+      return unsubscribe;
+    } catch (e) {
+      console.warn('[SHOP SETTINGS] Could not start snapshot listener:', e);
+      return null;
+    }
   },
 
   // ══════════════════════════════════════════════════════════════════════

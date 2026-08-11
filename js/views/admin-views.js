@@ -812,7 +812,7 @@ export const AdminViews = {
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.15); padding-bottom:1rem; margin-bottom:1.5rem;">
               <div>
                 <div style="color:#10b981; font-weight:700; font-size:0.85rem; text-transform:uppercase;">✓ UPI Payment Details Submitted</div>
-                <h3 style="font-size:1.4rem; margin-top:0.2rem;">TEAM 7 SYSTEM SOLUTION</h3>
+                <h3 style="font-size:1.4rem; margin-top:0.2rem;">${DBService.getSettingsSync().shopName || 'Print Shop'}</h3>
               </div>
               <div style="font-size:2.5rem;">📱</div>
             </div>
@@ -2058,19 +2058,35 @@ Thank you for choosing ${settings.shopName}!
     await this.renderAdminLayout('settings', html);
 
     document.getElementById('btn-save-settings-form').onclick = async () => {
-      settings.shopName = document.getElementById('st-name').value;
-      settings.upiId = document.getElementById('st-upi').value;
-      settings.merchantName = document.getElementById('st-merchant').value;
-      settings.gstNumber = document.getElementById('st-gst').value;
-      settings.phone = document.getElementById('st-phone').value;
-      settings.whatsappNumber = document.getElementById('st-whatsapp').value.trim();
-      settings.email = document.getElementById('st-email').value;
-      settings.address = document.getElementById('st-address').value;
-      settings.googleMapUrl = document.getElementById('st-map').value;
+      const btn = document.getElementById('btn-save-settings-form');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '⏳ Saving...';
+      btn.disabled = true;
 
-      await DBService.saveSettings(settings);
-      if (window.updateFloatingButtons) window.updateFloatingButtons();
-      NotificationService.showToast('Shop & WhatsApp Settings updated successfully!', 'success');
+      const updatedSettings = {
+        ...settings,
+        shopName: document.getElementById('st-name').value.trim(),
+        upiId: document.getElementById('st-upi').value.trim(),
+        merchantName: document.getElementById('st-merchant').value.trim(),
+        gstNumber: document.getElementById('st-gst').value.trim(),
+        phone: document.getElementById('st-phone').value.trim(),
+        whatsappNumber: document.getElementById('st-whatsapp').value.trim(),
+        email: document.getElementById('st-email').value.trim(),
+        address: document.getElementById('st-address').value.trim(),
+        googleMapUrl: document.getElementById('st-map').value.trim(),
+      };
+
+      try {
+        await DBService.saveSettings(updatedSettings);
+        if (window.updateFloatingButtons) window.updateFloatingButtons();
+        NotificationService.showToast('✅ Shop Settings saved successfully! All pages updated.', 'success');
+      } catch (err) {
+        console.error('[SHOP SETTINGS] Admin save failed:', err);
+        NotificationService.showToast('❌ Failed to save settings. Check your internet connection.', 'error');
+      } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }
     };
   },
 

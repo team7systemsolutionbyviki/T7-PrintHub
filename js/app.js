@@ -99,25 +99,29 @@ const initApp = () => {
       }
     });
 
-    // ── Step 4: Background parallel Firebase load (non-blocking) ──────────────
-    initFirebase().then(() => {
-      Promise.allSettled([
-        DBService.getSettings(),
-        DBService.getOrders(),
-        PricingEngine.preload(DBService)
-      ]).then(() => {
-        // Re-render current route with live Firebase data (public pages only)
-        // This ensures shop name, address, services, contact details, etc.
-        // reflect real Firebase values instead of the sync defaults shown on first paint.
-        const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
-        const publicRoutes = ['home', 'services', 'pricing', 'how-it-works', 'faq', 'order', 'track', 'contact', ''];
-        if (publicRoutes.includes(currentHash)) {
-          Router.handleRoute();
-        }
+    // ── Step 4: Background Firebase load + real-time settings listener ────────
+    // initFirebase() loads the SDK asynchronously without blocking the UI.
+    // Once ready, we subscribe to the Firestore settings document with onSnapshot()
+    // so any admin save immediately propagates to all public pages in real time.
+    initFirebase().then(async () => {
+      try {
+        // Warm up caches for orders and pricing in parallel
+        await Promise.allSettled([
+          DBService.getOrders(),
+          PricingEngine.preload(DBService)
+        ]);
+
+        // Subscribe to real-time Firestore settings listener.
+        // This replaces the one-shot getSettings() call and keeps settings live
+        // so admin changes are reflected on public pages without any manual refresh.
+        await DBService.onSettingsSnapshot();
+
         NavbarComponent.render();
         window.updateFloatingButtons();
-      });
-    }).catch(err => console.warn('Deferred Firebase init:', err));
+      } catch (err) {
+        console.warn('[App] Deferred Firebase init error:', err);
+      }
+    }).catch(err => console.warn('[App] Firebase init failed:', err));
 
   } catch (err) {
     console.error('App init error:', err);
