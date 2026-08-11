@@ -2078,7 +2078,7 @@ Thank you for choosing ${settings.shopName}!
 
       try {
         await DBService.saveSettings(updatedSettings);
-        if (window.updateFloatingButtons) window.updateFloatingButtons();
+        if (window.refreshShopSettingsUI) window.refreshShopSettingsUI(updatedSettings);
         NotificationService.showToast('✅ Shop Settings saved successfully! All pages updated.', 'success');
       } catch (err) {
         console.error('[SHOP SETTINGS] Admin save failed:', err);

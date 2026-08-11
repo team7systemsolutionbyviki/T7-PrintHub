@@ -1,6 +1,6 @@
 /* ==========================================================================
    TEAM 7 SYSTEM SOLUTION - MAIN APPLICATION ENTRY POINT
-   Firebase-Only Engine: Firebase settings loaded BEFORE first render
+   Firebase-Only Engine: Real-Time Shop Settings Synchronization
    ========================================================================== */
 
 import { initFirebase } from './config/firebase-config.js';
@@ -20,23 +20,78 @@ window.NotificationService = NotificationService;
 window.I18nService = I18nService;
 
 // ── Floating buttons ──────────────────────────────────────────────────────────
-// Only called AFTER _settingsCache is warm (from Firebase), so getSettingsSync()
-// returns correct Firebase values, never DEFAULT_SETTINGS on real renders.
 window.updateFloatingButtons = () => {
   try {
     const settings = DBService.getSettingsSync();
     const rawWa   = (settings.whatsappNumber || settings.phone || '').replace(/\D/g, '');
     const cleanWa = rawWa.length === 10 ? '91' + rawWa : rawWa;
     const waBtn   = document.getElementById('floating-whatsapp-btn');
-    if (waBtn && cleanWa) waBtn.href = `https://wa.me/${cleanWa}?text=${encodeURIComponent(`Hi ${settings.shopName}! I have a printing inquiry.`)}`;
+    if (waBtn && cleanWa) {
+      waBtn.href = `https://wa.me/${cleanWa}?text=${encodeURIComponent(`Hi ${settings.shopName || 'Shop'}! I have a printing inquiry.`)}`;
+    }
 
     const rawPhone  = (settings.phone || '').replace(/\D/g, '');
     const cleanCall = rawPhone.length === 10 ? '+91' + rawPhone : (rawPhone ? '+' + rawPhone : '');
     const callBtn   = document.getElementById('floating-call-btn');
-    if (callBtn && cleanCall) callBtn.href = `tel:${cleanCall}`;
+    if (callBtn && cleanCall) {
+      callBtn.href = `tel:${cleanCall}`;
+    }
   } catch (e) {
     console.warn('[App] updateFloatingButtons:', e);
   }
+};
+
+// ── Central Shop Settings UI Refresh Engine ──────────────────────────────────
+window.refreshShopSettingsUI = (settings) => {
+  const data = settings || DBService.getSettingsSync();
+
+  // 1. Update Document Title
+  if (data.shopName) {
+    document.title = `${data.shopName} | Online Document Printing & Management`;
+  }
+
+  // 2. Re-render Navbar and Footer brand/links
+  NavbarComponent.render();
+
+  // 3. Update Floating Action Buttons
+  window.updateFloatingButtons();
+
+  // 4. Update DOM elements with data-shop-setting attributes
+  document.querySelectorAll('[data-shop-setting]').forEach(el => {
+    const field = el.dataset.shopSetting;
+    const val = data[field];
+    if (val !== undefined && val !== null) {
+      if (el.tagName === 'IFRAME') {
+        if (field === 'googleMapUrl' || field === 'googleMapEmbedUrl') {
+          el.src = val;
+        }
+      } else if (el.tagName === 'A') {
+        if (field === 'phone' || field === 'supportPhone') {
+          const raw = String(val).replace(/\D/g, '');
+          el.href = `tel:${raw.length === 10 ? '+91' + raw : '+' + raw}`;
+          el.textContent = `📞 ${val}`;
+        } else if (field === 'email' || field === 'contactEmail') {
+          el.href = `mailto:${val}`;
+          el.textContent = `✉️ ${val}`;
+        } else if (field === 'whatsappNumber' || field === 'whatsapp') {
+          const rawWa = String(val).replace(/\D/g, '');
+          const cleanWa = rawWa.length === 10 ? '91' + rawWa : rawWa;
+          el.href = `https://wa.me/${cleanWa}?text=${encodeURIComponent(`Hi ${data.shopName || 'Shop'}! I have an inquiry.`)}`;
+        }
+      } else {
+        el.textContent = val;
+      }
+    }
+  });
+
+  // 5. Re-render active public route if currently visible to capture component template updates
+  const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
+  const publicRoutes = ['home', 'services', 'pricing', 'how-it-works', 'faq', 'order', 'track', 'contact', ''];
+  if (publicRoutes.includes(currentHash)) {
+    Router.handleRoute();
+  }
+
+  console.log('[APP] Shop Settings UI refreshed:', data);
 };
 
 // ── Loading screen helpers ────────────────────────────────────────────────────
@@ -108,15 +163,11 @@ const initApp = async () => {
       Router.handleRoute();
     });
 
-    // Admin saved settings → re-render public pages instantly with new data
-    window.addEventListener('settingsUpdated', () => {
-      NavbarComponent.render();
-      window.updateFloatingButtons();
-      const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
-      const publicRoutes = ['home', 'services', 'pricing', 'how-it-works', 'faq', 'order', 'track', 'contact', ''];
-      if (publicRoutes.includes(currentHash)) {
-        Router.handleRoute();
-      }
+    // Listen for settingsUpdated event — triggered on Admin save or snapshot
+    window.addEventListener('settingsUpdated', (event) => {
+      const settings = event.detail || DBService.getSettingsSync();
+      console.log('[APP] settingsUpdated received:', settings);
+      window.refreshShopSettingsUI(settings);
     });
 
     // Admin updated catalog → re-render home/services pages
@@ -128,33 +179,29 @@ const initApp = async () => {
     });
 
     // ── Step 3: Show a loading indicator while Firebase warms up ─────────────
-    // This prevents any flash of DEFAULT_SETTINGS before Firebase loads.
     showLoader();
 
     // ── Step 4: AWAIT Firebase init + settings load BEFORE first render ───────
-    // This is the critical fix: _settingsCache is populated with REAL Firebase
-    // data before Router.init() calls getSettingsSync() for the first time.
     console.log('[APP] Waiting for Firebase Shop Settings...');
     try {
       await initFirebase();
       await DBService.getSettings(true); // Force fresh fetch from Firebase server
       console.log('[APP] Firebase Shop Settings loaded');
     } catch (firebaseErr) {
-      // Firebase unavailable — proceed with defaults so app still renders
       console.warn('[APP] Firebase init failed, using defaults:', firebaseErr);
     }
 
-    // ── Step 5: RENDER the application — getSettingsSync() is now warmed ─────
-    // _settingsCache contains real Firebase data, not DEFAULT_SETTINGS.
-    // No flash, no alternating, no stale data.
+    // ── Step 5: RENDER the application ────────────────────────────────────────
     hideLoader();
     console.log('[APP] Rendering application');
     Router.init();
-    window.updateFloatingButtons();
+    window.refreshShopSettingsUI();
 
-    // ── Step 6: Start real-time Firestore listener for subsequent updates ─────
-    // Keeps the UI live: any admin save → onSnapshot → settingsUpdated → re-render
-    DBService.onSettingsSnapshot().catch(e => console.warn('[App] Snapshot err:', e));
+    // ── Step 6: Start real-time Firestore listener for cross-tab & cross-device updates ──
+    DBService.onSettingsSnapshot((settings) => {
+      console.log('[APP] Firebase Shop Settings changed:', settings);
+      window.refreshShopSettingsUI(settings);
+    }).catch(e => console.warn('[App] Snapshot err:', e));
 
     // ── Step 7: Warm up other caches in background (non-blocking) ────────────
     Promise.allSettled([
@@ -164,7 +211,6 @@ const initApp = async () => {
 
   } catch (err) {
     console.error('[App] Critical init error:', err);
-    // Last-resort fallback — render with whatever data is available
     try { Router.init(); } catch (e) {}
   }
 };

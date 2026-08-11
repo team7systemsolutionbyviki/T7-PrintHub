@@ -198,9 +198,9 @@ export const PublicViews = {
             <div>
               <h2 style="font-size: 2rem; margin-bottom: 1.5rem;">Visit Our Shop</h2>
               <div style="border-radius: var(--radius-lg); overflow:hidden; border:1px solid var(--border-color); height: 280px;">
-                <iframe src="${settings.googleMapUrl}" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+                <iframe src="${settings.googleMapUrl}" data-shop-setting="googleMapUrl" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
               </div>
-              <p style="margin-top:0.75rem; font-size:0.9rem; color:var(--text-muted);">📍 ${settings.address}</p>
+              <p style="margin-top:0.75rem; font-size:0.9rem; color:var(--text-muted);" data-shop-setting="address">📍 ${settings.address}</p>
             </div>
           </div>
         </div>
@@ -1752,30 +1752,30 @@ export const PublicViews = {
               <div style="display:flex; flex-direction:column; gap:1.25rem;">
                 <div>
                   <h4 style="font-size:0.9rem; color:var(--text-muted); text-transform:uppercase;">Shop Address</h4>
-                  <p style="font-weight:600; margin-top:0.25rem;">${settings.address}</p>
+                  <p style="font-weight:600; margin-top:0.25rem;" data-shop-setting="address">${settings.address}</p>
                 </div>
 
                 <div>
                   <h4 style="font-size:0.9rem; color:var(--text-muted); text-transform:uppercase;">Support Call Phone</h4>
-                  <p style="font-weight:600; margin-top:0.25rem;">${settings.phone} ${settings.altPhone ? `/ ${settings.altPhone}` : ''}</p>
+                  <p style="font-weight:600; margin-top:0.25rem;" data-shop-setting="phone">${settings.phone} ${settings.altPhone ? `/ ${settings.altPhone}` : ''}</p>
                 </div>
 
                 <div style="background:rgba(16,185,129,0.1); border:1.5px solid rgba(16,185,129,0.35); padding:1rem 1.15rem; border-radius:10px;">
                   <h4 style="font-size:0.85rem; color:#059669; text-transform:uppercase; font-weight:800; margin:0;">💬 Direct WhatsApp Business</h4>
-                  <p style="font-weight:800; font-size:1.05rem; margin-top:0.35rem; color:var(--text-main);">${settings.whatsappNumber || settings.phone}</p>
-                  <a href="https://wa.me/${((settings.whatsappNumber || settings.phone || '').replace(/\D/g,'').length === 10 ? '91' : '') + (settings.whatsappNumber || settings.phone || '').replace(/\D/g,'')}?text=${encodeURIComponent(`Hi ${settings.shopName || 'Team 7'}! I would like to inquire about printing.`)}" target="_blank" class="btn btn-sm btn-success mt-2" style="display:inline-flex; align-items:center; gap:0.4rem; font-weight:700;">
+                  <p style="font-weight:800; font-size:1.05rem; margin-top:0.35rem; color:var(--text-main);" data-shop-setting="whatsappNumber">${settings.whatsappNumber || settings.phone}</p>
+                  <a href="https://wa.me/${((settings.whatsappNumber || settings.phone || '').replace(/\D/g,'').length === 10 ? '91' : '') + (settings.whatsappNumber || settings.phone || '').replace(/\D/g,'')}?text=${encodeURIComponent(`Hi ${settings.shopName || 'Team 7'}! I would like to inquire about printing.`)}" target="_blank" class="btn btn-sm btn-success mt-2" style="display:inline-flex; align-items:center; gap:0.4rem; font-weight:700;" data-shop-setting="whatsappNumber">
                     💬 Open WhatsApp Chat
                   </a>
                 </div>
 
                 <div>
                   <h4 style="font-size:0.9rem; color:var(--text-muted); text-transform:uppercase;">Email Address</h4>
-                  <p style="font-weight:600; margin-top:0.25rem;">${settings.email}</p>
+                  <p style="font-weight:600; margin-top:0.25rem;" data-shop-setting="email">${settings.email}</p>
                 </div>
 
                 <div>
                   <h4 style="font-size:0.9rem; color:var(--text-muted); text-transform:uppercase;">Business Hours</h4>
-                  <p style="font-weight:600; margin-top:0.25rem;">${settings.businessHours}</p>
+                  <p style="font-weight:600; margin-top:0.25rem;" data-shop-setting="businessHours">${settings.businessHours}</p>
                 </div>
               </div>
             </div>

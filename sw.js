@@ -1,9 +1,9 @@
 /* ==========================================================================
    T7-PRINT HUB - SERVICE WORKER
-   Cache Version: v7
+   Cache Version: v8
    ========================================================================== */
 
-const CACHE_NAME = 't7-printhub-v7';
+const CACHE_NAME = 't7-printhub-v8';
 
 // Firebase and external services that must NEVER be intercepted
 const BYPASS_ORIGINS = [
@@ -20,7 +20,7 @@ const BYPASS_ORIGINS = [
 
 // INSTALL
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing T7-PrintHub v7');
+  console.log('[SW] Installing T7-PrintHub v8');
 
   self.skipWaiting();
 });
