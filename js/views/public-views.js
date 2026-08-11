@@ -271,7 +271,13 @@ export const PublicViews = {
   async renderServices() {
     const catalog = DBService.getServicesCatalogSync();
     const activeServices = catalog.filter(s => s.status !== 'Inactive');
-    const isAdmin = AuthService.isAdmin();
+
+    const products = DBService.getProductsCatalogSync();
+    const activeProducts = products.filter(p => p.status !== 'Inactive');
+    const settings = DBService.getSettingsSync();
+
+    const rawWa = (settings.whatsappNumber || settings.phone || '').replace(/\D/g, '');
+    const cleanWa = rawWa.length === 10 ? '91' + rawWa : rawWa;
 
     const app = document.getElementById('app-content');
     app.innerHTML = `
@@ -282,7 +288,7 @@ export const PublicViews = {
             <p class="text-muted" style="max-width:650px; margin:0.5rem auto 0;">Explore our full suite of professional document printing, thesis binding, CAD plot rendering, and protective lamination services.</p>
           </div>
 
-          <div class="services-grid" style="margin-top:3rem;">
+          <div class="services-grid" style="margin-top:2.5rem;">
             ${activeServices.map(s => `
               <div class="service-card" style="position:relative;">
                 ${s.popular ? `<span class="badge badge-approved" style="position:absolute; top:1rem; right:1rem; font-size:0.7rem;">Popular</span>` : ''}
@@ -300,8 +306,50 @@ export const PublicViews = {
             `).join('')}
           </div>
 
+          <!-- STATIONERY & SHOP PRODUCTS SHOWCASE (PENS, PENCILS, FOLDERS) -->
+          <div style="margin-top:5rem; padding-top:3rem; border-top:2px dashed var(--border-color);">
+            <div class="text-center mb-4">
+              <span class="badge badge-approved mb-2" style="font-size:0.85rem;">✏️ Shop Sales & Stationery</span>
+              <h2 style="font-size:2.25rem;">Pens, Pencils & Document Accessories</h2>
+              <p class="text-muted" style="max-width:650px; margin:0.5rem auto 0;">Buy high-quality pens, pencils, project file folders, notebooks, and ID card accessories directly at our store or with your print delivery.</p>
+            </div>
+
+            <div class="services-grid" style="margin-top:2.5rem;">
+              ${activeProducts.map(p => `
+                <div class="service-card" style="position:relative; background:var(--bg-card); border-color:var(--border-color);">
+                  ${p.popular ? `<span class="badge badge-approved" style="position:absolute; top:1rem; right:1rem; font-size:0.7rem;">Best Seller</span>` : ''}
+                  <div class="service-icon" style="background:rgba(59,130,246,0.08); width:54px; height:54px; font-size:1.8rem; border-radius:12px; display:flex; align-items:center; justify-content:center;">${p.icon || '🖊️'}</div>
+                  
+                  <div style="margin-top:0.85rem;">
+                    <span class="badge badge-waiting" style="font-size:0.7rem;">${p.category || 'Stationery'}</span>
+                    <h3 style="margin:0.4rem 0 0.3rem; font-size:1.25rem;">${p.title}</h3>
+                  </div>
+
+                  <p class="text-muted" style="font-size:0.875rem; flex:1; margin-bottom:1.25rem;">${p.description}</p>
+                  
+                  <div style="display:flex; justify-content:space-between; align-items:center; padding-top:1rem; border-top:1px solid var(--border-color);">
+                    <div>
+                      <div style="font-weight:800; font-size:1.15rem; color:var(--primary);">${p.price}</div>
+                      <div style="font-size:0.72rem; margin-top:0.15rem;">
+                        ${p.stockStatus === 'Out of Stock' ? '<span style="color:#ef4444; font-weight:700;">❌ Out of Stock</span>' : '<span style="color:#10b981; font-weight:700;">✓ In Stock</span>'}
+                      </div>
+                    </div>
+
+                    ${cleanWa ? `
+                      <a href="https://wa.me/${cleanWa}?text=${encodeURIComponent(`Hi ${settings.shopName || 'Shop'}! I would like to buy / order: ${p.title} (${p.price}).`)}" target="_blank" class="btn btn-sm ${p.stockStatus === 'Out of Stock' ? 'btn-secondary disabled' : 'btn-success'}" style="font-weight:700;">
+                        🛍️ Buy Now
+                      </a>
+                    ` : `
+                      <a href="#contact" class="btn btn-sm btn-outline">Inquire Shop</a>
+                    `}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
           <div class="glass-panel text-center glow-effect" style="margin-top:4rem; padding:3rem 2rem;">
-            <h2 style="font-size:2rem; margin-bottom:0.75rem;">Need Custom Bulk Printing?</h2>
+            <h2 style="font-size:2rem; margin-bottom:0.75rem;">Need Custom Bulk Printing or Office Supplies?</h2>
             <p class="text-muted" style="max-width:550px; margin:0 auto 1.5rem;">We offer bulk volume discounts for schools, colleges, architecture firms, and enterprise offices.</p>
             <a href="#contact" class="btn btn-lg btn-primary">Contact Sales Team</a>
           </div>

@@ -178,6 +178,14 @@ const initApp = async () => {
       }
     });
 
+    // Admin updated products/stationery → re-render home/services pages
+    window.addEventListener('productsUpdated', () => {
+      const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
+      if (currentHash === 'home' || currentHash === 'services') {
+        Router.handleRoute();
+      }
+    });
+
     // ── Step 3: Show a loading indicator while Firebase warms up ─────────────
     showLoader();
 

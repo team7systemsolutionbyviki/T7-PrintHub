@@ -118,6 +118,81 @@ export const DEFAULT_SERVICES = [
   }
 ];
 
+export const DEFAULT_PRODUCTS = [
+  {
+    id: "prod-gel-pen-blue",
+    title: "Executive Blue Gel Pen",
+    category: "Pen",
+    price: "₹15.00 / piece",
+    numericPrice: 15.00,
+    icon: "🖋️",
+    status: "Active",
+    stockStatus: "In Stock",
+    description: "0.5mm smooth waterproof blue gel ink pen for signing and project writing.",
+    popular: true
+  },
+  {
+    id: "prod-ball-pen-black",
+    title: "Smooth Ballpoint Pen Pack (3 Pcs)",
+    category: "Pen",
+    price: "₹20.00 / pack",
+    numericPrice: 20.00,
+    icon: "🖊️",
+    status: "Active",
+    stockStatus: "In Stock",
+    description: "Quick-drying black ballpoint pen 3-piece bundle for daily office & exam use.",
+    popular: true
+  },
+  {
+    id: "prod-pencil-set",
+    title: "HB Graphite Pencil Pack with Eraser",
+    category: "Pencil",
+    price: "₹30.00 / pack",
+    numericPrice: 30.00,
+    icon: "✏️",
+    status: "Active",
+    stockStatus: "In Stock",
+    description: "Premium HB dark wood graphite pencils (5 Pcs) + dust-free eraser & sharpener.",
+    popular: false
+  },
+  {
+    id: "prod-clear-folder",
+    title: "A4 Clear Vinyl Project File Folder",
+    category: "Folder",
+    price: "₹12.00 / piece",
+    numericPrice: 12.00,
+    icon: "📁",
+    status: "Active",
+    stockStatus: "In Stock",
+    description: "Transparent plastic clip folder to protect report sheets and thesis papers.",
+    popular: true
+  },
+  {
+    id: "prod-notebook-a4",
+    title: "A4 Executive Ruled Notebook (100 Pgs)",
+    category: "Notebook",
+    price: "₹45.00 / book",
+    numericPrice: 45.00,
+    icon: "📓",
+    status: "Active",
+    stockStatus: "In Stock",
+    description: "High-grade 80 GSM white paper notebook for college notes and record keeping.",
+    popular: false
+  },
+  {
+    id: "prod-id-lanyard",
+    title: "Transparent ID Card Holder & Lanyard",
+    category: "Accessory",
+    price: "₹25.00 / set",
+    numericPrice: 25.00,
+    icon: "🪪",
+    status: "Active",
+    stockStatus: "In Stock",
+    description: "Heavy-duty plastic ID pouch with blue nylon lanyard for badges and certificates.",
+    popular: false
+  }
+];
+
 const SAMPLE_PDF_PREVIEW = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800" style="background:%23ffffff; font-family:sans-serif;"><rect width="600" height="800" fill="%23f8fafc"/><rect x="40" y="40" width="520" height="720" rx="12" fill="white" stroke="%23cbd5e1" stroke-width="2"/><text x="70" y="100" font-size="24" font-weight="bold" fill="%231e293b">Project Final Report</text><text x="70" y="130" font-size="14" fill="%2364748b">Anna University - Department of Computer Science</text><line x1="70" y1="150" x2="530" y2="150" stroke="%23e2e8f0" stroke-width="2"/><rect x="70" y="180" width="460" height="12" rx="4" fill="%23cbd5e1"/><rect x="70" y="205" width="420" height="12" rx="4" fill="%23e2e8f0"/><rect x="70" y="230" width="440" height="12" rx="4" fill="%23e2e8f0"/><rect x="70" y="255" width="380" height="12" rx="4" fill="%23e2e8f0"/><rect x="70" y="300" width="220" height="140" rx="8" fill="%23eff6ff" stroke="%233b82f6" stroke-dasharray="4"/><text x="110" y="375" font-size="14" fill="%232563eb">Figure 1. Diagram</text><rect x="310" y="300" width="220" height="140" rx="8" fill="%23f0fdf4" stroke="%2322c55e" stroke-dasharray="4"/><text x="350" y="375" font-size="14" fill="%2316a34a">Table 1. Results</text></svg>`;
 
 const SAMPLE_SCREENSHOT_1 = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600" style="background:%230f172a; font-family:sans-serif;"><rect width="400" height="600" fill="%230f172a"/><rect x="20" y="20" width="360" height="560" rx="20" fill="%231e293b" stroke="%23334155" stroke-width="2"/><circle cx="200" cy="90" r="35" fill="%2310b981"/><text x="200" y="100" font-size="36" text-anchor="middle" fill="white">✓</text><text x="200" y="155" font-size="18" font-weight="bold" text-anchor="middle" fill="white">Payment Successful</text><text x="200" y="180" font-size="13" text-anchor="middle" fill="%2394a3b8">Paid to TEAM 7 SYSTEM SOLUTION</text><text x="200" y="235" font-size="32" font-weight="800" text-anchor="middle" fill="%2338bdf8">₹225.97</text><rect x="40" y="270" width="320" height="240" rx="12" fill="%230f172a" stroke="%23334155"/><text x="60" y="310" font-size="12" fill="%2394a3b8">UPI Ref / UTR No.</text><text x="60" y="335" font-size="16" font-weight="bold" fill="%23f8fafc" font-family="monospace">329817264512</text><text x="60" y="380" font-size="12" fill="%2394a3b8">From Google Pay UPI</text><text x="60" y="405" font-size="15" font-weight="bold" fill="%23f8fafc">Rajesh Kumar</text><text x="60" y="450" font-size="12" fill="%2394a3b8">Merchant UPI ID</text><text x="60" y="475" font-size="14" fill="%2338bdf8">9789123456@upi</text></svg>`;

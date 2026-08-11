@@ -2090,79 +2090,162 @@ Thank you for choosing ${settings.shopName}!
     };
   },
 
-  // --- SERVICE CATALOG MANAGER (FULL CRUD) ---
-  async renderCatalog() {
+  // --- SERVICE & STATIONERY PRODUCT CATALOG MANAGER (FULL CRUD) ---
+  async renderCatalog(activeTab = 'services') {
     const catalog = await DBService.getServicesCatalog();
+    const products = await DBService.getProductsCatalog();
 
     const html = `
-      <div class="table-card">
-        <div class="table-toolbar">
-          <div>
-            <h3>Services Catalog Management (CRUD)</h3>
-            <p class="text-muted" style="font-size:0.85rem;">Create, edit, or delete offerings displayed on the customer services page.</p>
-          </div>
-          <div style="display:flex; gap:0.5rem; align-items:center;">
-            <a href="#services" class="btn btn-outline" title="Preview Public Services Catalog">👁️ View Customer Page ↗</a>
-            <button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add New Service Offer</button>
-          </div>
-        </div>
-
-        <div class="table-responsive">
-          <table class="data-table" id="catalog-table">
-            <thead>
-              <tr>
-                <th>Icon</th>
-                <th>Service Title</th>
-                <th>Category</th>
-                <th>Starting Rate</th>
-                <th>Description</th>
-                <th>Badge</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${catalog.length === 0 ? `
-                <tr>
-                  <td colspan="8" class="text-center text-muted" style="padding:3rem;">
-                    No services created in catalog yet. Click "+ Add New Service Offer" to create one.
-                  </td>
-                </tr>
-              ` : catalog.map(s => `
-                <tr>
-                  <td style="font-size:1.5rem; text-align:center;">${s.icon || '📄'}</td>
-                  <td>
-                    <b>${s.title}</b>
-                    <div style="font-size:0.75rem; color:var(--text-muted);">ID: ${s.id}</div>
-                  </td>
-                  <td><span class="badge badge-waiting" style="font-size:0.75rem;">${s.category || 'General'}</span></td>
-                  <td><b style="color:var(--primary);">${s.startingPrice}</b></td>
-                  <td style="font-size:0.825rem; color:var(--text-muted); max-width:250px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${s.description}">
-                    ${s.description}
-                  </td>
-                  <td>
-                    ${s.popular ? '<span class="badge badge-approved">Popular</span>' : '<span class="badge" style="background:var(--border-color); color:var(--text-muted);">Standard</span>'}
-                  </td>
-                  <td>
-                    ${s.status === 'Inactive' ? '<span class="badge badge-rejected">● Inactive</span>' : '<span class="badge badge-approved">● Active</span>'}
-                  </td>
-                  <td>
-                    <div style="display:flex; gap:0.35rem;">
-                      <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem;" onclick="window.openCatalogModal('${s.id}')">✏️ Edit</button>
-                      <button class="btn btn-sm btn-danger" style="padding:0.25rem 0.5rem;" onclick="window.deleteCatalogItem('${s.id}')">🗑️ Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
+      <div style="margin-bottom:1.5rem; display:flex; gap:0.75rem; border-bottom:2px solid var(--border-color); padding-bottom:0.75rem;">
+        <button class="btn ${activeTab === 'services' ? 'btn-primary' : 'btn-outline'}" onclick="window.AdminViews.renderCatalog('services')" style="font-weight:700;">
+          🖨️ Printing Services (${catalog.length})
+        </button>
+        <button class="btn ${activeTab === 'products' ? 'btn-primary' : 'btn-outline'}" onclick="window.AdminViews.renderCatalog('products')" style="font-weight:700;">
+          ✏️ Stationery & Sales Products (${products.length})
+        </button>
       </div>
+
+      ${activeTab === 'services' ? `
+        <!-- PRINTING SERVICES CRUD TABLE -->
+        <div class="table-card">
+          <div class="table-toolbar">
+            <div>
+              <h3>Printing Services Catalog Management (CRUD)</h3>
+              <p class="text-muted" style="font-size:0.85rem;">Create, edit, or delete print service offerings displayed on the website.</p>
+            </div>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <a href="#services" class="btn btn-outline" title="Preview Public Services Catalog">👁️ View Customer Page ↗</a>
+              <button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add New Service Offer</button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table" id="catalog-table">
+              <thead>
+                <tr>
+                  <th>Icon</th>
+                  <th>Service Title</th>
+                  <th>Category</th>
+                  <th>Starting Rate</th>
+                  <th>Description</th>
+                  <th>Badge</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${catalog.length === 0 ? `
+                  <tr>
+                    <td colspan="8" class="text-center text-muted" style="padding:3rem;">
+                      No services created in catalog yet. Click "+ Add New Service Offer" to create one.
+                    </td>
+                  </tr>
+                ` : catalog.map(s => `
+                  <tr>
+                    <td style="font-size:1.5rem; text-align:center;">${s.icon || '📄'}</td>
+                    <td>
+                      <b>${s.title}</b>
+                      <div style="font-size:0.75rem; color:var(--text-muted);">ID: ${s.id}</div>
+                    </td>
+                    <td><span class="badge badge-waiting" style="font-size:0.75rem;">${s.category || 'General'}</span></td>
+                    <td><b style="color:var(--primary);">${s.startingPrice}</b></td>
+                    <td style="font-size:0.825rem; color:var(--text-muted); max-width:250px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${s.description}">
+                      ${s.description}
+                    </td>
+                    <td>
+                      ${s.popular ? '<span class="badge badge-approved">Popular</span>' : '<span class="badge" style="background:var(--border-color); color:var(--text-muted);">Standard</span>'}
+                    </td>
+                    <td>
+                      ${s.status === 'Inactive' ? '<span class="badge badge-rejected">● Inactive</span>' : '<span class="badge badge-approved">● Active</span>'}
+                    </td>
+                    <td>
+                      <div style="display:flex; gap:0.35rem;">
+                        <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem;" onclick="window.openCatalogModal('${s.id}')">✏️ Edit</button>
+                        <button class="btn btn-sm btn-danger" style="padding:0.25rem 0.5rem;" onclick="window.deleteCatalogItem('${s.id}')">🗑️ Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : `
+        <!-- STATIONERY & PRODUCTS CRUD TABLE -->
+        <div class="table-card">
+          <div class="table-toolbar">
+            <div>
+              <h3>Stationery & Shop Sales Management (Pens, Pencils, Accessories)</h3>
+              <p class="text-muted" style="font-size:0.85rem;">Add, edit, or remove pens, pencils, notebooks, folders, and accessories sold at the shop.</p>
+            </div>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <a href="#services" class="btn btn-outline" title="Preview Stationery Showcase">👁️ View Customer Page ↗</a>
+              <button class="btn btn-success" onclick="window.openProductModal()">➕ Add New Product (Pen/Pencil/Folder)</button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table" id="products-table">
+              <thead>
+                <tr>
+                  <th>Icon</th>
+                  <th>Product Name</th>
+                  <th>Category</th>
+                  <th>Price Tag</th>
+                  <th>Stock Availability</th>
+                  <th>Description</th>
+                  <th>Badge</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${products.length === 0 ? `
+                  <tr>
+                    <td colspan="9" class="text-center text-muted" style="padding:3rem;">
+                      No stationery or sales products created yet. Click "+ Add New Product" to create one.
+                    </td>
+                  </tr>
+                ` : products.map(p => `
+                  <tr>
+                    <td style="font-size:1.5rem; text-align:center;">${p.icon || '🖊️'}</td>
+                    <td>
+                      <b>${p.title}</b>
+                      <div style="font-size:0.75rem; color:var(--text-muted);">ID: ${p.id}</div>
+                    </td>
+                    <td><span class="badge badge-waiting" style="font-size:0.75rem;">${p.category || 'Stationery'}</span></td>
+                    <td><b style="color:var(--primary);">${p.price}</b></td>
+                    <td>
+                      ${p.stockStatus === 'Out of Stock' ? '<span class="badge badge-rejected">❌ Out of Stock</span>' : '<span class="badge badge-approved">✓ In Stock</span>'}
+                    </td>
+                    <td style="font-size:0.825rem; color:var(--text-muted); max-width:230px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${p.description}">
+                      ${p.description}
+                    </td>
+                    <td>
+                      ${p.popular ? '<span class="badge badge-approved">Best Seller</span>' : '<span class="badge" style="background:var(--border-color); color:var(--text-muted);">Standard</span>'}
+                    </td>
+                    <td>
+                      ${p.status === 'Inactive' ? '<span class="badge badge-rejected">● Hidden</span>' : '<span class="badge badge-approved">● Active</span>'}
+                    </td>
+                    <td>
+                      <div style="display:flex; gap:0.35rem;">
+                        <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem;" onclick="window.openProductModal('${p.id}')">✏️ Edit</button>
+                        <button class="btn btn-sm btn-danger" style="padding:0.25rem 0.5rem;" onclick="window.deleteProductItem('${p.id}')">🗑️ Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `}
     `;
 
     await this.renderAdminLayout('catalog', html);
+    window.AdminViews = this;
 
-    // Global Modal & Actions for Catalog CRUD
+    // ── Global Modal & Actions for Printing Service Catalog CRUD ──────────────
     window.openCatalogModal = async (serviceId = null) => {
       const allItems = await DBService.getServicesCatalog();
       const existing = serviceId ? allItems.find(item => item.id === serviceId) : null;
@@ -2252,14 +2335,133 @@ Thank you for choosing ${settings.shopName}!
 
       if (window.ModalComponent) window.ModalComponent.close();
       NotificationService.showToast(serviceId ? 'Service catalog item updated!' : 'New service offering added!', 'success');
-      this.renderCatalog();
+      this.renderCatalog('services');
     };
 
     window.deleteCatalogItem = async (serviceId) => {
       if (confirm('Are you sure you want to delete this service from the catalog?')) {
         await DBService.deleteCatalogItem(serviceId);
         NotificationService.showToast('Service deleted from catalog.', 'info');
-        this.renderCatalog();
+        this.renderCatalog('services');
+      }
+    };
+
+    // ── Global Modal & Actions for Stationery & Product Sales CRUD ─────────────
+    window.openProductModal = async (productId = null) => {
+      const allProducts = await DBService.getProductsCatalog();
+      const existing = productId ? allProducts.find(p => p.id === productId) : null;
+
+      const modalHTML = `
+        <form id="product-form" onsubmit="event.preventDefault(); window.saveProductForm('${productId || ''}');">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+            <div class="form-group">
+              <label class="form-label">Product Name *</label>
+              <input type="text" class="form-control" id="prod-title" value="${existing?.title || ''}" placeholder="E.g., Executive Blue Gel Pen" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Category *</label>
+              <select class="form-select" id="prod-category">
+                <option value="Pen" ${existing?.category === 'Pen' ? 'selected' : ''}>Pen</option>
+                <option value="Pencil" ${existing?.category === 'Pencil' ? 'selected' : ''}>Pencil</option>
+                <option value="Folder" ${existing?.category === 'Folder' ? 'selected' : ''}>Folder / File</option>
+                <option value="Notebook" ${existing?.category === 'Notebook' ? 'selected' : ''}>Notebook / Paper</option>
+                <option value="Accessory" ${existing?.category === 'Accessory' ? 'selected' : ''}>Accessory / Lanyard</option>
+                <option value="Stationery" ${!existing || existing?.category === 'Stationery' ? 'selected' : ''}>General Stationery</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem;">
+            <div class="form-group">
+              <label class="form-label">Price Tag *</label>
+              <input type="text" class="form-control" id="prod-price" value="${existing?.price || '₹15.00 / piece'}" placeholder="E.g., ₹15.00 / piece" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Icon Emoji</label>
+              <input type="text" class="form-control" id="prod-icon" value="${existing?.icon || '🖊️'}" placeholder="E.g., 🖋️, 🖊️, ✏️, 📁, 📓, 🪪">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Stock Status</label>
+              <select class="form-select" id="prod-stock">
+                <option value="In Stock" ${existing?.stockStatus !== 'Out of Stock' ? 'selected' : ''}>In Stock</option>
+                <option value="Out of Stock" ${existing?.stockStatus === 'Out of Stock' ? 'selected' : ''}>Out of Stock</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Product Description *</label>
+            <textarea class="form-control" id="prod-desc" rows="3" placeholder="Description of pen, pencil, or stationery item..." required>${existing?.description || ''}</textarea>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+            <div class="form-group">
+              <label class="form-label">Catalog Status</label>
+              <select class="form-select" id="prod-status">
+                <option value="Active" ${existing?.status !== 'Inactive' ? 'selected' : ''}>Active (Visible)</option>
+                <option value="Inactive" ${existing?.status === 'Inactive' ? 'selected' : ''}>Inactive (Hidden)</option>
+              </select>
+            </div>
+            <div class="form-group" style="display:flex; align-items:center; gap:0.5rem; margin-top:1.8rem;">
+              <input type="checkbox" id="prod-popular" ${existing?.popular ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;">
+              <label for="prod-popular" style="margin:0; font-weight:600; cursor:pointer;">Highlight as "Best Seller" Badge</label>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
+            <button type="button" class="btn btn-secondary" onclick="if(window.ModalComponent) window.ModalComponent.close(); else document.getElementById('active-modal-overlay')?.remove();">Cancel</button>
+            <button type="submit" class="btn btn-success">💾 ${productId ? 'Update Product' : 'Save New Product'}</button>
+          </div>
+        </form>
+      `;
+
+      const modal = ModalComponent || window.ModalComponent;
+      if (modal) {
+        modal.show({
+          title: productId ? `✏️ Edit Product (Pens / Pencils / Stationery)` : `➕ Add New Product (Pens / Pencils / Stationery)`,
+          bodyHTML: modalHTML,
+          width: '650px'
+        });
+      }
+    };
+
+    window.saveProductForm = async (productId) => {
+      const title = document.getElementById('prod-title')?.value.trim();
+      const category = document.getElementById('prod-category')?.value;
+      const price = document.getElementById('prod-price')?.value.trim();
+      const icon = document.getElementById('prod-icon')?.value.trim() || '🖊️';
+      const stockStatus = document.getElementById('prod-stock')?.value || 'In Stock';
+      const status = document.getElementById('prod-status')?.value || 'Active';
+      const description = document.getElementById('prod-desc')?.value.trim();
+      const popular = document.getElementById('prod-popular')?.checked || false;
+
+      if (!title || !price || !description) {
+        NotificationService.showToast('Please fill out all required product fields.', 'warning');
+        return;
+      }
+
+      await DBService.saveProductItem({
+        ...(productId ? { id: productId } : {}),
+        title,
+        category,
+        price,
+        icon,
+        stockStatus,
+        status,
+        description,
+        popular
+      });
+
+      if (window.ModalComponent) window.ModalComponent.close();
+      NotificationService.showToast(productId ? 'Stationery product updated!' : 'New stationery product added!', 'success');
+      this.renderCatalog('products');
+    };
+
+    window.deleteProductItem = async (productId) => {
+      if (confirm('Are you sure you want to delete this product from the inventory?')) {
+        await DBService.deleteProductItem(productId);
+        NotificationService.showToast('Product deleted from inventory.', 'info');
+        this.renderCatalog('products');
       }
     };
   }
