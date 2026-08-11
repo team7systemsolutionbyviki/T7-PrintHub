@@ -87,6 +87,8 @@ export const DBService = {
         console.warn('Save settings error:', e);
       }
     }
+    // Notify the app that settings changed so public pages can re-render with fresh data
+    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: _settingsCache }));
     return true;
   },
 
@@ -576,6 +578,7 @@ export const DBService = {
         await setDoc(doc(db, 'services', targetItem.id), targetItem);
       } catch (e) { console.warn('Save catalog item:', e); }
     }
+    window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
     return targetItem;
   },
 
@@ -589,6 +592,7 @@ export const DBService = {
         await deleteDoc(doc(db, 'services', serviceId));
       } catch (e) {}
     }
+    window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
     return true;
   }
 };

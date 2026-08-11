@@ -80,6 +80,25 @@ const initApp = () => {
     Router.init();
     window.updateFloatingButtons();
 
+    // ── Listen for settings saved by admin — refresh public pages live ─────────
+    window.addEventListener('settingsUpdated', () => {
+      NavbarComponent.render();
+      window.updateFloatingButtons();
+      const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
+      const publicRoutes = ['home', 'services', 'pricing', 'how-it-works', 'faq', 'order', 'track', 'contact', ''];
+      if (publicRoutes.includes(currentHash)) {
+        Router.handleRoute();
+      }
+    });
+
+    // ── Listen for catalog changes — refresh home/services pages ──────────────
+    window.addEventListener('catalogUpdated', () => {
+      const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
+      if (currentHash === 'home' || currentHash === 'services') {
+        Router.handleRoute();
+      }
+    });
+
     // ── Step 4: Background parallel Firebase load (non-blocking) ──────────────
     initFirebase().then(() => {
       Promise.allSettled([
@@ -87,6 +106,14 @@ const initApp = () => {
         DBService.getOrders(),
         PricingEngine.preload(DBService)
       ]).then(() => {
+        // Re-render current route with live Firebase data (public pages only)
+        // This ensures shop name, address, services, contact details, etc.
+        // reflect real Firebase values instead of the sync defaults shown on first paint.
+        const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
+        const publicRoutes = ['home', 'services', 'pricing', 'how-it-works', 'faq', 'order', 'track', 'contact', ''];
+        if (publicRoutes.includes(currentHash)) {
+          Router.handleRoute();
+        }
         NavbarComponent.render();
         window.updateFloatingButtons();
       });
