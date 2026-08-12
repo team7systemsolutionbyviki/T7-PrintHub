@@ -49,7 +49,6 @@ function renderStationeryShowcase(products, settings, compact = false) {
     </section>`;
 }
 
-<<<<<<< HEAD
 
 function serviceAction(service) {
   const id = String(service?.id || '').toLowerCase();
@@ -80,8 +79,6 @@ function formatServicePrice(service) {
   return service?.startingPrice || 'Price on request';
 }
 
-=======
->>>>>>> ad8b87cce13d7ec7b0c77d8a06768372dfa3db02
 export const PublicViews = {
   // --- HOME PAGE ---
   async renderHome() {
