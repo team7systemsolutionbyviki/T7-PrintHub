@@ -11,14 +11,86 @@ import { NotificationService } from '../services/notification-service.js';
 import { I18nService } from '../services/i18n-service.js';
 import { formatCurrency, getStatusBadgeHTML, formatDate, formatTime } from '../utils/formatters.js';
 
+
+function renderStationeryShowcase(products, settings, compact = false) {
+  const activeProducts = (products || []).filter(p => p.status !== 'Inactive');
+  if (!activeProducts.length) return '';
+  const rawWa = String(settings.whatsappNumber || settings.phone || '').replace(/\D/g, '');
+  const wa = rawWa.length === 10 ? '91' + rawWa : rawWa;
+  const title = compact ? 'Stationery & Shop Sales' : 'Stationery & Shop Sales';
+  const subtitle = compact ? 'Pens, pencils, folders, notebooks and useful document accessories.' : 'Buy everyday stationery and document accessories directly from our shop.';
+  return `
+    <section id="stationery-showcase" style="padding:4rem 0; background:var(--bg-card); border-top:1px solid var(--border-color);">
+      <div class="container">
+        <div class="text-center mb-4">
+          <h2 style="font-size:2.25rem;">✏️ ${title}</h2>
+          <p class="text-muted" style="max-width:650px;margin:0.5rem auto 0;">${subtitle}</p>
+        </div>
+        <div class="services-grid">
+          ${activeProducts.map(p => {
+            const inStock = p.stockStatus !== 'Out of Stock';
+            const message = `Hi ${settings.shopName || 'Shop'}! I want to order ${p.name} (${Number(p.price || 0).toFixed(2)}). Please confirm availability.`;
+            const orderHref = wa ? `https://wa.me/${wa}?text=${encodeURIComponent(message)}` : '#contact';
+            return `
+              <div class="service-card" style="position:relative;">
+                ${p.popular ? '<span class="badge badge-approved" style="position:absolute;top:1rem;right:1rem;font-size:0.7rem;">Popular</span>' : ''}
+                <div class="service-icon">${p.icon || '📦'}</div>
+                <div style="margin-bottom:0.4rem;"><span class="badge badge-waiting" style="font-size:0.7rem;">${p.category || 'Accessory'}</span></div>
+                <h3 style="margin-bottom:0.5rem;font-size:1.2rem;">${p.name}</h3>
+                <p class="text-muted" style="font-size:0.88rem;flex:1;margin-bottom:1rem;">${p.description || ''}</p>
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;padding-top:1rem;border-top:1px solid var(--border-color);">
+                  <div><div style="font-size:1.15rem;font-weight:800;color:var(--primary);">₹${Number(p.price || 0).toFixed(2)}</div><div style="font-size:0.75rem;color:${inStock ? 'var(--success)' : 'var(--danger)'};font-weight:700;">${inStock ? '● In Stock' : '● Out of Stock'}</div></div>
+                  ${inStock ? `<a href="${orderHref}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Order / Buy Now</a>` : '<button class="btn btn-secondary btn-sm" disabled>Out of Stock</button>'}
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </section>`;
+}
+
+
+function serviceAction(service) {
+  const id = String(service?.id || '').toLowerCase();
+  const title = String(service?.title || '').toLowerCase();
+  const category = String(service?.category || '').toLowerCase();
+
+  // Keep the existing PDF printing wizard for these core print-calculation services.
+  const usesPrintWizard = ['doc-print', 'binding', 'lamination'].includes(id);
+  if (usesPrintWizard) {
+    return { href: '#order', label: 'Order Print →' };
+  }
+
+  // All other catalog services (design/printing, photo, flex, cards, computer repair,
+  // laptop/PC services, etc.) use the service-request form and WhatsApp enquiry flow.
+  const serviceId = encodeURIComponent(String(service?.id || ''));
+  const label = (title.includes('laptop') || title.includes('pc') || title.includes('computer') ||
+                 category.includes('computer') || category.includes('laptop') || category.includes('repair'))
+    ? 'Book Service →'
+    : 'Request Service →';
+
+  return { href: `#service-request?serviceId=${serviceId}`, label };
+}
+
+function formatServicePrice(service) {
+  const price = Number(service?.price);
+  const unit = String(service?.priceUnit || '').trim();
+  if (Number.isFinite(price) && unit) return `₹${price.toFixed(2)} / ${unit}`;
+  return service?.startingPrice || 'Price on request';
+}
+
 export const PublicViews = {
   // --- HOME PAGE ---
   async renderHome() {
     const settings = DBService.getSettingsSync();
     const pricing = PricingEngine.getPricingData();
-    const catalog = DBService.getServicesCatalogSync();
+    // Always load the Firestore-backed catalog before rendering.
+    // This prevents the Home page from briefly/incorrectly using DEFAULT_SERVICES
+    // after a fresh page refresh.
+    const catalog = await DBService.getServicesCatalog();
     const activeServices = (catalog || []).filter(s => s.status !== 'Inactive');
     const displayServices = activeServices.length > 0 ? activeServices : DEFAULT_SERVICES;
+    const products = DBService.getProductsCatalogSync();
     const app = document.getElementById('app-content');
     if (!app) return;
 
@@ -133,14 +205,16 @@ export const PublicViews = {
                 <h3 style="margin-bottom: 0.5rem;">${s.title}</h3>
                 <p class="text-muted" style="font-size: 0.9rem; flex:1;">${s.description}</p>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--border-color);">
-                  <span style="font-weight:700; font-size:0.9rem; color:var(--primary);">${s.startingPrice}</span>
-                  <a href="#order" class="btn btn-sm btn-outline">Order Now</a>
+                  <span style="font-weight:700; font-size:0.9rem; color:var(--primary);">${formatServicePrice(s)}</span>
+                  ${(() => { const action = serviceAction(s); return `<a href="${action.href}" class="btn btn-sm btn-outline">${action.label}</a>`; })()}
                 </div>
               </div>
             `).join('')}
           </div>
         </div>
       </section>
+
+      ${renderStationeryShowcase(products, settings, true)}
 
       <!-- How It Works Section -->
       <section id="how-it-works-section" style="padding: 4rem 0;">
@@ -269,8 +343,10 @@ export const PublicViews = {
 
   // --- SERVICES PAGE ---
   async renderServices() {
-    const catalog = DBService.getServicesCatalogSync();
+    // Load the latest Firestore-backed catalog before rendering the Services page.
+    const catalog = await DBService.getServicesCatalog();
     const activeServices = catalog.filter(s => s.status !== 'Inactive');
+    const products = DBService.getProductsCatalogSync();
     const isAdmin = AuthService.isAdmin();
 
     const app = document.getElementById('app-content');
@@ -292,13 +368,15 @@ export const PublicViews = {
                 <div style="display:flex; justify-content:space-between; align-items:center; padding-top:1.25rem; border-top:1px solid var(--border-color);">
                   <div>
                     <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Starting At</div>
-                    <div style="font-weight:800; font-size:1.1rem; color:var(--primary);">${s.startingPrice}</div>
+                    <div style="font-weight:800; font-size:1.1rem; color:var(--primary);">${formatServicePrice(s)}</div>
                   </div>
-                  <a href="#order" class="btn btn-primary btn-sm">Order Print →</a>
+                  ${(() => { const action = serviceAction(s); return `<a href="${action.href}" class="btn btn-primary btn-sm">${action.label}</a>`; })()}
                 </div>
               </div>
             `).join('')}
           </div>
+
+          ${renderStationeryShowcase(products, DBService.getSettingsSync())}
 
           <div class="glass-panel text-center glow-effect" style="margin-top:4rem; padding:3rem 2rem;">
             <h2 style="font-size:2rem; margin-bottom:0.75rem;">Need Custom Bulk Printing?</h2>
@@ -383,6 +461,16 @@ export const PublicViews = {
     const pricing = PricingEngine.getPricingData();
     const app = document.getElementById('app-content');
 
+    // Load the same Firestore-managed stationery catalog used by Admin/Public pages.
+    // Only active + in-stock products are offered as optional order add-ons.
+    let orderProducts = [];
+    try {
+      const catalog = await DBService.getProductsCatalog();
+      orderProducts = (catalog || []).filter(p => p && String(p.status || 'Active').toLowerCase() === 'active' && String(p.stockStatus || 'In Stock').toLowerCase() === 'in stock');
+    } catch (err) {
+      console.warn('Optional product catalog could not be loaded:', err);
+    }
+
     let state = {
       files: [], // { name, size, dataUrl, pages }
       totalPages: 1,
@@ -407,7 +495,8 @@ export const PublicViews = {
         utr: '',
         payerName: '',
         screenshotUrl: ''
-      }
+      },
+      products: {} // { productId: quantity }
     };
 
     app.innerHTML = `
@@ -495,6 +584,17 @@ export const PublicViews = {
                 <div class="form-group">
                   <label class="form-label">${I18nService.t('delivery_address_label')}</label>
                   <textarea class="form-control" id="cust-address" placeholder="Enter full address if requesting doorstep delivery"></textarea>
+                </div>
+
+                <div id="order-products-section" style="margin-top:1.25rem; padding:1.25rem; background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-bottom:0.9rem; flex-wrap:wrap;">
+                    <div>
+                      <h4 style="margin:0; font-size:1rem;">🛍️ Add Products / Accessories</h4>
+                      <p class="text-muted" style="margin:0.25rem 0 0; font-size:0.78rem;">Optional items like files, pens and stationery can be added to this print order.</p>
+                    </div>
+                    <span style="font-size:0.72rem; padding:0.3rem 0.6rem; border-radius:999px; background:var(--primary-light); color:var(--primary); font-weight:700;">Optional</span>
+                  </div>
+                  <div id="order-products-list"></div>
                 </div>
 
                 <div class="flex justify-between mt-4">
@@ -600,6 +700,12 @@ export const PublicViews = {
                 <span>${I18nService.t('summary_delivery')}</span>
                 <span id="price-delivery">₹0.00</span>
               </div>
+              <div class="price-row" id="row-products" style="display:none;">
+                <span>🛍️ Products / Accessories</span>
+                <span id="price-products">₹0.00</span>
+              </div>
+
+              <div id="summary-products-list" style="display:none; margin:0.25rem 0 0.75rem; font-size:0.78rem; color:var(--text-muted);"></div>
 
               <div class="price-row total-row">
                 <span>${I18nService.t('summary_grand_total')}</span>
@@ -612,6 +718,60 @@ export const PublicViews = {
     `;
 
     // --- Interactive Wizard Controller Logic ---
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+
+    const getSelectedProducts = () => orderProducts
+      .map(p => ({
+        ...p,
+        quantity: Math.max(0, Number(state.products[p.id] || 0))
+      }))
+      .filter(p => p.quantity > 0);
+
+    const getProductsTotal = () => getSelectedProducts()
+      .reduce((sum, p) => sum + (Number(p.price) || 0) * p.quantity, 0);
+
+    const renderOrderProducts = () => {
+      const list = document.getElementById('order-products-list');
+      if (!list) return;
+
+      if (!orderProducts.length) {
+        list.innerHTML = '<div style="padding:0.75rem; text-align:center; color:var(--text-muted); font-size:0.82rem;">No optional products are currently available.</div>';
+        return;
+      }
+
+      list.innerHTML = orderProducts.map(p => {
+        const qty = Math.max(0, Number(state.products[p.id] || 0));
+        const price = Number(p.price) || 0;
+        return `
+          <div data-order-product="${escapeHtml(p.id)}" style="display:grid; grid-template-columns:42px minmax(0,1fr) auto; gap:0.75rem; align-items:center; padding:0.7rem 0; border-top:1px solid var(--border-color);">
+            <div style="width:42px; height:42px; border-radius:10px; background:var(--primary-light); display:flex; align-items:center; justify-content:center; font-size:1.35rem;">${escapeHtml(p.icon || '🛍️')}</div>
+            <div style="min-width:0;">
+              <div style="font-weight:750; font-size:0.86rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.name)}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.15rem;">${escapeHtml(p.category || 'Accessory')} • ${formatCurrency(price)} each</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.35rem;">
+              <button type="button" class="btn btn-sm btn-secondary order-product-minus" data-product-id="${escapeHtml(p.id)}" style="width:32px; height:32px; padding:0;">−</button>
+              <span id="order-product-qty-${escapeHtml(p.id)}" style="min-width:24px; text-align:center; font-weight:800;">${qty}</span>
+              <button type="button" class="btn btn-sm btn-primary order-product-plus" data-product-id="${escapeHtml(p.id)}" style="width:32px; height:32px; padding:0;">+</button>
+            </div>
+          </div>`;
+      }).join('');
+
+      list.querySelectorAll('.order-product-minus, .order-product-plus').forEach(btn => {
+        btn.onclick = () => {
+          const id = btn.dataset.productId;
+          const delta = btn.classList.contains('order-product-plus') ? 1 : -1;
+          const current = Math.max(0, Number(state.products[id] || 0));
+          state.products[id] = Math.max(0, current + delta);
+          if (state.products[id] === 0) delete state.products[id];
+          renderOrderProducts();
+          updateCalculations();
+        };
+      });
+    };
+
+    renderOrderProducts();
+
     const updateCalculations = () => {
       const selectedZoneKey = document.getElementById('cust-delivery-zone')?.value || 'Pickup';
 
@@ -631,9 +791,11 @@ export const PublicViews = {
       const deliveryZones = pricing.deliveryZones || {};
       const deliveryFee = Number((deliveryZones[selectedZoneKey]?.fee || 0).toFixed(2));
 
-      const subtotal = totalPaper + totalColor + totalBinding + totalLamination + deliveryFee;
+      const products = getSelectedProducts();
+      const productsCost = products.reduce((sum, p) => sum + ((Number(p.price) || 0) * p.quantity), 0);
+      const subtotal = totalPaper + totalColor + totalBinding + totalLamination + deliveryFee + productsCost;
       const total = subtotal;
-      const quote = { paperCost: totalPaper, colorCost: totalColor, bindingCost: totalBinding, laminationCost: totalLamination, deliveryFee, deliveryZone: selectedZoneKey, gst: 0, total };
+      const quote = { paperCost: totalPaper, colorCost: totalColor, bindingCost: totalBinding, laminationCost: totalLamination, deliveryFee, deliveryZone: selectedZoneKey, productsCost, gst: 0, total };
 
       const labelPrintCostEl = document.getElementById('label-print-cost');
       if (labelPrintCostEl) {
@@ -670,6 +832,18 @@ export const PublicViews = {
       if (deliveryRow) deliveryRow.style.display = deliveryFee > 0 ? '' : 'none';
       const deliveryEl = document.getElementById('price-delivery');
       if (deliveryEl) deliveryEl.innerText = formatCurrency(deliveryFee);
+
+      const productsRow = document.getElementById('row-products');
+      if (productsRow) productsRow.style.display = productsCost > 0 ? '' : 'none';
+      const productsEl = document.getElementById('price-products');
+      if (productsEl) productsEl.innerText = formatCurrency(productsCost);
+      const summaryProducts = document.getElementById('summary-products-list');
+      if (summaryProducts) {
+        summaryProducts.style.display = products.length ? '' : 'none';
+        summaryProducts.innerHTML = products.length
+          ? products.map(p => `<div style="display:flex;justify-content:space-between;gap:0.75rem;padding:0.15rem 0;"><span>${escapeHtml(p.icon || '🛍️')} ${escapeHtml(p.name)} × ${p.quantity}</span><span>${formatCurrency((Number(p.price) || 0) * p.quantity)}</span></div>`).join('')
+          : '';
+      }
 
       const grandTotalEl = document.getElementById('price-grand-total');
       if (grandTotalEl) grandTotalEl.innerText = formatCurrency(total);
@@ -1406,6 +1580,15 @@ export const PublicViews = {
               options: f.options
             })),
             options: state.files.length > 0 ? state.files[0].options : {},
+            products: getSelectedProducts().map(p => ({
+              id: p.id,
+              name: p.name,
+              category: p.category || '',
+              icon: p.icon || '🛍️',
+              price: Number(p.price) || 0,
+              quantity: p.quantity,
+              subtotal: (Number(p.price) || 0) * p.quantity
+            })),
             pricing: quote,
             payment: {
               method: 'UPI QR',
@@ -1525,6 +1708,200 @@ export const PublicViews = {
 
 
     updateCalculations();
+  },
+
+
+  // --- SERVICE REQUEST / LAPTOP & PC BOOKING PAGE ---
+  async renderServiceRequest(queryStr = '') {
+    const app = document.getElementById('app-content');
+    const params = new URLSearchParams(queryStr);
+    const serviceId = params.get('serviceId') || '';
+    const catalog = await DBService.getServicesCatalog();
+    const service = (catalog || []).find(s => String(s.id) === serviceId) || null;
+
+    if (!service || service.status === 'Inactive') {
+      app.innerHTML = `
+        <section style="padding:5rem 1rem; text-align:center;">
+          <div class="container" style="max-width:650px;">
+            <div class="glass-panel" style="padding:3rem 2rem;">
+              <div style="font-size:3rem;">⚠️</div>
+              <h2>Service Not Available</h2>
+              <p class="text-muted">This service may have been removed or is currently inactive.</p>
+              <a href="#services" class="btn btn-primary">Back to Services</a>
+            </div>
+          </div>
+        </section>`;
+      return;
+    }
+
+    const title = String(service.title || 'Service Request');
+    const lowerTitle = title.toLowerCase();
+    const lowerCategory = String(service.category || '').toLowerCase();
+    const isComputer = lowerTitle.includes('laptop') || lowerTitle.includes('pc') ||
+      lowerTitle.includes('computer') || lowerCategory.includes('computer') ||
+      lowerCategory.includes('laptop') || lowerCategory.includes('repair');
+    const deviceLabel = lowerTitle.includes('laptop') ? 'Laptop' :
+      (lowerTitle.includes('pc') || lowerTitle.includes('desktop') ? 'PC / Desktop' : 'Laptop / PC');
+    const whatsappNumber = '9360039283';
+
+    const computerOptions = `
+      <option value="">Select service</option>
+      <option>Windows Installation</option>
+      <option>OS / Software Troubleshooting</option>
+      <option>Laptop Cleaning</option>
+      <option>SSD Upgrade</option>
+      <option>RAM Upgrade</option>
+      <option>Keyboard Replacement</option>
+      <option>Display Problem</option>
+      <option>Battery Problem</option>
+      <option>Charging Problem</option>
+      <option>Data Backup / Recovery</option>
+      <option>Other</option>`;
+    const generalOptions = `
+      <option value="">Select requirement</option>
+      <option>New Design</option>
+      <option>Printing</option>
+      <option>Design + Printing</option>
+      <option>Bulk Order</option>
+      <option>Reprint</option>
+      <option>Other</option>`;
+
+    app.innerHTML = `
+      <section style="padding:3rem 1rem 5rem;">
+        <div class="container" style="max-width:900px;">
+          <div class="text-center mb-4">
+            <div style="font-size:3rem;">${service.icon || (isComputer ? '💻' : '📝')}</div>
+            <h1 style="font-size:2.3rem; margin:.5rem 0;">${title}</h1>
+            <p class="text-muted" style="max-width:680px;margin:.5rem auto;">${service.description || 'Send us your requirements and we will confirm the final price and service time.'}</p>
+            <div style="display:inline-flex;align-items:center;gap:.4rem;margin-top:.5rem;padding:.5rem .8rem;border-radius:999px;background:var(--primary-light);color:var(--primary);font-weight:800;">
+              Starting ${formatServicePrice(service)}
+            </div>
+          </div>
+
+          <form id="service-request-form" class="glass-panel" style="padding:2rem;" onsubmit="event.preventDefault(); window.submitServiceRequest();">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;">
+              <div class="form-group">
+                <label class="form-label">Customer Name *</label>
+                <input class="form-control" id="sr-name" required placeholder="Enter your name">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Mobile Number *</label>
+                <input class="form-control" id="sr-phone" required inputmode="tel" placeholder="10-digit mobile number">
+              </div>
+            </div>
+
+            ${isComputer ? `
+              <div style="margin-top:1.25rem;padding:1rem;border:1px solid var(--border-color);border-radius:12px;background:var(--bg-card);">
+                <h3 style="margin:0 0 1rem;">💻 ${deviceLabel} Details</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
+                  <div class="form-group"><label class="form-label">Brand *</label><input class="form-control" id="sr-brand" required placeholder="Dell, HP, Lenovo..."></div>
+                  <div class="form-group"><label class="form-label">Model</label><input class="form-control" id="sr-model" placeholder="Model number"></div>
+                  <div class="form-group"><label class="form-label">Processor</label><input class="form-control" id="sr-processor" placeholder="i3 / i5 / Ryzen..."></div>
+                  <div class="form-group"><label class="form-label">RAM</label><input class="form-control" id="sr-ram" placeholder="8 GB / 16 GB"></div>
+                  <div class="form-group"><label class="form-label">Storage</label><input class="form-control" id="sr-storage" placeholder="SSD / HDD"></div>
+                </div>
+              </div>` : `
+              <div style="margin-top:1.25rem;padding:1rem;border:1px solid var(--border-color);border-radius:12px;background:var(--bg-card);">
+                <h3 style="margin:0 0 1rem;">📋 Order Details</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;">
+                  <div class="form-group"><label class="form-label">Requirement *</label><select class="form-select" id="sr-requirement-type" required>${generalOptions}</select></div>
+                  <div class="form-group"><label class="form-label">Quantity</label><input class="form-control" id="sr-quantity" type="number" min="1" placeholder="e.g. 100"></div>
+                  <div class="form-group"><label class="form-label">Size / Specification</label><input class="form-control" id="sr-spec" placeholder="A4, 3x2 ft, 500 cards..."></div>
+                </div>
+              </div>`}
+
+            <div class="form-group" style="margin-top:1.25rem;">
+              <label class="form-label">${isComputer ? 'Service Required *' : 'Additional Requirements'}</label>
+              ${isComputer
+                ? `<select class="form-select" id="sr-requirement" required>${computerOptions}</select>`
+                : `<textarea class="form-control" id="sr-requirement" rows="3" placeholder="Tell us exactly what you need..."></textarea>`}
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Problem / Additional Details</label>
+              <textarea class="form-control" id="sr-details" rows="4" placeholder="${isComputer ? 'Describe the laptop/PC problem clearly...' : 'Add colours, material, design instructions, delivery details, etc.'}"></textarea>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;">
+              <div class="form-group">
+                <label class="form-label">${isComputer ? 'Pickup Required?' : 'Delivery / Pickup'}</label>
+                <select class="form-select" id="sr-pickup">
+                  <option>No - I will visit the shop</option>
+                  <option>Yes - Pickup required</option>
+                  <option>Delivery required</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Preferred Date</label>
+                <input class="form-control" id="sr-date" type="date">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Preferred Time</label>
+                <input class="form-control" id="sr-time" type="time">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Address</label>
+              <textarea class="form-control" id="sr-address" rows="2" placeholder="Required for pickup/delivery"></textarea>
+            </div>
+
+            <div style="padding:1rem;border-radius:10px;background:var(--primary-light);font-size:.85rem;color:var(--text-muted);margin-bottom:1.25rem;">
+              ℹ️ Final price and service time will be confirmed by our team. The displayed catalog price is a starting price.
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-lg" style="width:100%;">
+              📲 Send Request on WhatsApp
+            </button>
+          </form>
+        </div>
+      </section>`;
+
+    window.submitServiceRequest = () => {
+      const get = id => document.getElementById(id)?.value?.trim() || '';
+      const name = get('sr-name');
+      const phone = get('sr-phone');
+      if (!name || !phone) {
+        NotificationService.showToast('Please enter your name and mobile number.', 'warning');
+        return;
+      }
+      const requirement = isComputer ? get('sr-requirement') : [get('sr-requirement-type'), get('sr-requirement')].filter(Boolean).join(' | ');
+      const messageLines = [
+        `T7-PrintHub Service Request`,
+        `Service: ${title}`,
+        `Starting Price: ${formatServicePrice(service)}`,
+        `Customer: ${name}`,
+        `Mobile: ${phone}`
+      ];
+
+      if (isComputer) {
+        messageLines.push(
+          `Brand: ${get('sr-brand')}`,
+          `Model: ${get('sr-model')}`,
+          `Processor: ${get('sr-processor')}`,
+          `RAM: ${get('sr-ram')}`,
+          `Storage: ${get('sr-storage')}`,
+          `Service Required: ${requirement}`
+        );
+      } else {
+        messageLines.push(
+          `Requirement: ${requirement}`,
+          `Quantity: ${get('sr-quantity') || 'Not specified'}`,
+          `Size / Specification: ${get('sr-spec') || 'Not specified'}`
+        );
+      }
+
+      messageLines.push(
+        `Details: ${get('sr-details') || 'None'}`,
+        `Pickup / Delivery: ${get('sr-pickup')}`,
+        `Preferred Date: ${get('sr-date') || 'Not specified'}`,
+        `Preferred Time: ${get('sr-time') || 'Not specified'}`,
+        `Address: ${get('sr-address') || 'Not specified'}`
+      );
+
+      const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(messageLines.join('\\n'))}`;
+      window.open(waUrl, '_blank', 'noopener');
+    };
   },
 
   // --- TRACK ORDER PAGE ---
