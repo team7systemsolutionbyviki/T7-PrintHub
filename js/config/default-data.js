@@ -67,6 +67,18 @@ export const DEFAULT_PRICING = {
   }
 };
 
+
+export const DEFAULT_PRODUCTS = [
+  { id: "prod-gel-pen", name: "Executive Blue Gel Pen", category: "Pen", price: 15.00, icon: "🖋️", stockStatus: "In Stock", description: "Smooth-writing blue gel pen for everyday writing and office use.", popular: true, status: "Active" },
+  { id: "prod-ball-pen", name: "Smooth Ballpoint Pen Set", category: "Pen", price: 20.00, icon: "🖊️", stockStatus: "In Stock", description: "Reliable smooth ballpoint pens suitable for school, office, and daily use.", popular: false, status: "Active" },
+  { id: "prod-hb-pencil", name: "HB Graphite Pencil Pack", category: "Pencil", price: 30.00, icon: "✏️", stockStatus: "In Stock", description: "HB graphite pencils for writing, drawing, school, and office work.", popular: true, status: "Active" },
+  { id: "prod-project-folder", name: "Clear Vinyl Project Folder / File Cover", category: "Folder", price: 12.00, icon: "📁", stockStatus: "In Stock", description: "Clear vinyl project folder for protecting reports, documents, and assignments.", popular: false, status: "Active" },
+  { id: "prod-notebook", name: "A4 Ruled Notebook 100 Pages", category: "Notebook", price: 45.00, icon: "📓", stockStatus: "In Stock", description: "A4 ruled 100-page notebook for notes, records, projects, and study.", popular: true, status: "Active" },
+  { id: "prod-id-holder", name: "Transparent ID Card Holder & Lanyard", category: "Accessory", price: 25.00, icon: "🪪", stockStatus: "In Stock", description: "Transparent ID card holder with lanyard for school, office, and events.", popular: false, status: "Active" },
+  { id: "prod-stick-file", name: "Stick File / Report File", category: "Folder", price: 10.00, icon: "📂", stockStatus: "In Stock", description: "Simple stick file for project reports, assignments, and document submissions.", popular: true, status: "Active" },
+  { id: "prod-document-file", name: "Document File", category: "Folder", price: 5.00, icon: "🗂️", stockStatus: "In Stock", description: "Lightweight document file for keeping printed papers organized.", popular: false, status: "Active" }
+];
+
 export const DEFAULT_SERVICES = [
   {
     id: "doc-print",

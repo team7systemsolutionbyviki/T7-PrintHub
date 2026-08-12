@@ -173,7 +173,12 @@ const initApp = async () => {
     // Admin updated catalog → re-render home/services pages
     window.addEventListener('catalogUpdated', () => {
       const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
-      if (currentHash === 'home' || currentHash === 'services') {
+      if (currentHash === 'home' || currentHash === 'services' || currentHash === 'admin-catalog') Router.handleRoute();
+    });
+
+    window.addEventListener('productsUpdated', () => {
+      const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
+      if (currentHash === 'home' || currentHash === 'services' || currentHash === 'admin-catalog') {
         Router.handleRoute();
       }
     });
@@ -186,7 +191,13 @@ const initApp = async () => {
     try {
       await initFirebase();
       await DBService.getSettings(true); // Force fresh fetch from Firebase server
-      console.log('[APP] Firebase Shop Settings loaded');
+
+      // Load the service catalog before the first public-page render.
+      // Without this, renderHome()/renderServices() can use DEFAULT_SERVICES
+      // on a fresh refresh and show an old price until another render occurs.
+      await DBService.getServicesCatalog();
+
+      console.log('[APP] Firebase Shop Settings and Service Catalog loaded');
     } catch (firebaseErr) {
       console.warn('[APP] Firebase init failed, using defaults:', firebaseErr);
     }
@@ -206,6 +217,7 @@ const initApp = async () => {
     // ── Step 7: Warm up other caches in background (non-blocking) ────────────
     Promise.allSettled([
       DBService.getOrders(),
+      DBService.getProductsCatalog(),
       PricingEngine.preload(DBService)
     ]).catch(() => {});
 

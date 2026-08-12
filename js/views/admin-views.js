@@ -2090,177 +2090,163 @@ Thank you for choosing ${settings.shopName}!
     };
   },
 
-  // --- SERVICE CATALOG MANAGER (FULL CRUD) ---
+  // --- CATALOG MANAGER: PRINTING SERVICES + STATIONERY PRODUCTS ---
   async renderCatalog() {
     const catalog = await DBService.getServicesCatalog();
+    const products = await DBService.getProductsCatalog();
+    const activeTab = new URLSearchParams(window.location.hash.split('?')[1] || '').get('tab') || 'printing';
 
     const html = `
       <div class="table-card">
-        <div class="table-toolbar">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; padding:1.25rem; border-bottom:1px solid var(--border-color);">
           <div>
-            <h3>Services Catalog Management (CRUD)</h3>
-            <p class="text-muted" style="font-size:0.85rem;">Create, edit, or delete offerings displayed on the customer services page.</p>
+            <h3>Catalog & Products</h3>
+            <p class="text-muted" style="font-size:0.85rem; margin-top:0.25rem;">Manage printing services and stationery/shop products displayed to customers.</p>
           </div>
-          <div style="display:flex; gap:0.5rem; align-items:center;">
-            <a href="#services" class="btn btn-outline" title="Preview Public Services Catalog">👁️ View Customer Page ↗</a>
-            <button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add New Service Offer</button>
-          </div>
+          <a href="${activeTab === 'stationery' ? '#services' : '#services'}" class="btn btn-outline">👁️ View Customer Catalog ↗</a>
         </div>
 
-        <div class="table-responsive">
-          <table class="data-table" id="catalog-table">
-            <thead>
-              <tr>
-                <th>Icon</th>
-                <th>Service Title</th>
-                <th>Category</th>
-                <th>Starting Rate</th>
-                <th>Description</th>
-                <th>Badge</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${catalog.length === 0 ? `
-                <tr>
-                  <td colspan="8" class="text-center text-muted" style="padding:3rem;">
-                    No services created in catalog yet. Click "+ Add New Service Offer" to create one.
-                  </td>
-                </tr>
-              ` : catalog.map(s => `
-                <tr>
-                  <td style="font-size:1.5rem; text-align:center;">${s.icon || '📄'}</td>
-                  <td>
-                    <b>${s.title}</b>
-                    <div style="font-size:0.75rem; color:var(--text-muted);">ID: ${s.id}</div>
-                  </td>
-                  <td><span class="badge badge-waiting" style="font-size:0.75rem;">${s.category || 'General'}</span></td>
-                  <td><b style="color:var(--primary);">${s.startingPrice}</b></td>
-                  <td style="font-size:0.825rem; color:var(--text-muted); max-width:250px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${s.description}">
-                    ${s.description}
-                  </td>
-                  <td>
-                    ${s.popular ? '<span class="badge badge-approved">Popular</span>' : '<span class="badge" style="background:var(--border-color); color:var(--text-muted);">Standard</span>'}
-                  </td>
-                  <td>
-                    ${s.status === 'Inactive' ? '<span class="badge badge-rejected">● Inactive</span>' : '<span class="badge badge-approved">● Active</span>'}
-                  </td>
-                  <td>
-                    <div style="display:flex; gap:0.35rem;">
-                      <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem;" onclick="window.openCatalogModal('${s.id}')">✏️ Edit</button>
-                      <button class="btn btn-sm btn-danger" style="padding:0.25rem 0.5rem;" onclick="window.deleteCatalogItem('${s.id}')">🗑️ Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+        <div style="display:flex; gap:0.5rem; padding:1rem 1.25rem; border-bottom:1px solid var(--border-color); flex-wrap:wrap;">
+          <button class="btn ${activeTab === 'printing' ? 'btn-primary' : 'btn-outline'}" onclick="window.switchCatalogTab('printing')">🖨️ Printing Services Catalog</button>
+          <button class="btn ${activeTab === 'stationery' ? 'btn-primary' : 'btn-outline'}" onclick="window.switchCatalogTab('stationery')">✏️ Stationery & Shop Sales</button>
         </div>
+
+        ${activeTab === 'stationery' ? `
+          <div class="table-toolbar">
+            <div>
+              <h3>Stationery & Shop Sales</h3>
+              <p class="text-muted" style="font-size:0.85rem;">Pens, pencils, folders, notebooks, ID accessories, and other shop products.</p>
+            </div>
+            <button class="btn btn-success" onclick="window.openProductModal()">➕ Add New Product</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="products-table">
+              <thead><tr><th>Icon</th><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Badge</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                ${products.length === 0 ? `<tr><td colspan="8" class="text-center text-muted" style="padding:3rem;">No products found. Click “Add New Product”.</td></tr>` : products.map(p => `
+                  <tr>
+                    <td style="font-size:1.5rem; text-align:center;">${p.icon || '📦'}</td>
+                    <td><b>${p.name || ''}</b><div style="font-size:0.75rem;color:var(--text-muted);">ID: ${p.id}</div></td>
+                    <td><span class="badge badge-waiting" style="font-size:0.75rem;">${p.category || 'Accessory'}</span></td>
+                    <td><b style="color:var(--primary);">₹${Number(p.price || 0).toFixed(2)}</b></td>
+                    <td>${p.stockStatus === 'Out of Stock' ? '<span class="badge badge-rejected">● Out of Stock</span>' : '<span class="badge badge-approved">● In Stock</span>'}</td>
+                    <td>${p.popular ? '<span class="badge badge-approved">Popular</span>' : '<span class="badge" style="background:var(--border-color);color:var(--text-muted);">Standard</span>'}</td>
+                    <td>${p.status === 'Inactive' ? '<span class="badge badge-rejected">● Inactive</span>' : '<span class="badge badge-approved">● Active</span>'}</td>
+                    <td><div style="display:flex;gap:0.35rem;"><button class="btn btn-sm btn-outline" onclick="window.openProductModal('${p.id}')">✏️ Edit</button><button class="btn btn-sm btn-danger" onclick="window.deleteProductItem('${p.id}')">🗑️ Delete</button></div></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : `
+          <div class="table-toolbar">
+            <div>
+              <h3>Printing Services Catalog Management</h3>
+              <p class="text-muted" style="font-size:0.85rem;">Create, edit, or delete printing offerings displayed on the customer services page.</p>
+            </div>
+            <button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add New Service Offer</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="catalog-table">
+              <thead><tr><th>Icon</th><th>Service Title</th><th>Category</th><th>Starting Rate</th><th>Description</th><th>Badge</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                ${catalog.length === 0 ? `<tr><td colspan="8" class="text-center text-muted" style="padding:3rem;">No services created in catalog yet.</td></tr>` : catalog.map(s => `
+                  <tr>
+                    <td style="font-size:1.5rem;text-align:center;">${s.icon || '📄'}</td>
+                    <td><b>${s.title}</b><div style="font-size:0.75rem;color:var(--text-muted);">ID: ${s.id}</div></td>
+                    <td><span class="badge badge-waiting" style="font-size:0.75rem;">${s.category || 'General'}</span></td>
+                    <td><b style="color:var(--primary);">${s.startingPrice}</b></td>
+                    <td style="font-size:0.825rem;color:var(--text-muted);max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.description}</td>
+                    <td>${s.popular ? '<span class="badge badge-approved">Popular</span>' : '<span class="badge" style="background:var(--border-color);color:var(--text-muted);">Standard</span>'}</td>
+                    <td>${s.status === 'Inactive' ? '<span class="badge badge-rejected">● Inactive</span>' : '<span class="badge badge-approved">● Active</span>'}</td>
+                    <td><div style="display:flex;gap:0.35rem;"><button class="btn btn-sm btn-outline" onclick="window.openCatalogModal('${s.id}')">✏️ Edit</button><button class="btn btn-sm btn-danger" onclick="window.deleteCatalogItem('${s.id}')">🗑️ Delete</button></div></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `}
       </div>
     `;
 
     await this.renderAdminLayout('catalog', html);
 
-    // Global Modal & Actions for Catalog CRUD
+    window.switchCatalogTab = (tab) => {
+      window.location.hash = `#admin-catalog?tab=${tab}`;
+    };
+
+    window.openProductModal = async (productId = null) => {
+      const allItems = await DBService.getProductsCatalog();
+      const existing = productId ? allItems.find(item => item.id === productId) : null;
+      const modalHTML = `
+        <form id="product-form" onsubmit="event.preventDefault(); window.saveProductForm('${productId || ''}');">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div class="form-group"><label class="form-label">Product Name *</label><input type="text" class="form-control" id="prod-name" value="${existing?.name || ''}" placeholder="e.g. Gel Pen Blue" required></div>
+            <div class="form-group"><label class="form-label">Category *</label><select class="form-select" id="prod-category" required>
+              ${['Pen','Pencil','Folder','Notebook','Accessory'].map(c => `<option value="${c}" ${existing?.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+            </select></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+            <div class="form-group"><label class="form-label">Price (₹) *</label><input type="number" class="form-control" id="prod-price" value="${existing?.price ?? 0}" min="0" step="0.01" required></div>
+            <div class="form-group"><label class="form-label">Icon Emoji</label><input type="text" class="form-control" id="prod-icon" value="${existing?.icon || '📦'}" placeholder="🖋️"></div>
+            <div class="form-group"><label class="form-label">Stock Status</label><select class="form-select" id="prod-stock"><option value="In Stock" ${existing?.stockStatus !== 'Out of Stock' ? 'selected' : ''}>In Stock</option><option value="Out of Stock" ${existing?.stockStatus === 'Out of Stock' ? 'selected' : ''}>Out of Stock</option></select></div>
+          </div>
+          <div class="form-group"><label class="form-label">Description *</label><textarea class="form-control" id="prod-desc" rows="3" required>${existing?.description || ''}</textarea></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div class="form-group"><label class="form-label">Product Status</label><select class="form-select" id="prod-status"><option value="Active" ${existing?.status !== 'Inactive' ? 'selected' : ''}>Active</option><option value="Inactive" ${existing?.status === 'Inactive' ? 'selected' : ''}>Inactive</option></select></div>
+            <div class="form-group" style="display:flex;align-items:center;gap:0.5rem;padding-top:1.8rem;"><input type="checkbox" id="prod-popular" ${existing?.popular ? 'checked' : ''} style="width:18px;height:18px;"><label for="prod-popular" style="margin:0;font-weight:600;">Popular Badge</label></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:0.75rem;margin-top:1.5rem;"><button type="button" class="btn btn-secondary" onclick="window.ModalComponent?.close()">Cancel</button><button type="submit" class="btn btn-success">💾 ${productId ? 'Update Product' : 'Create Product'}</button></div>
+        </form>`;
+      const modal = ModalComponent || window.ModalComponent;
+      if (modal) modal.show({ title: productId ? '✏️ Edit Product' : '➕ Add New Product', bodyHTML: modalHTML, width: '700px' });
+    };
+
+    window.saveProductForm = async (productId) => {
+      const name = document.getElementById('prod-name')?.value.trim();
+      const category = document.getElementById('prod-category')?.value;
+      const price = Number(document.getElementById('prod-price')?.value);
+      const icon = document.getElementById('prod-icon')?.value.trim() || '📦';
+      const stockStatus = document.getElementById('prod-stock')?.value || 'In Stock';
+      const description = document.getElementById('prod-desc')?.value.trim();
+      const status = document.getElementById('prod-status')?.value || 'Active';
+      const popular = document.getElementById('prod-popular')?.checked || false;
+      if (!name || !category || !Number.isFinite(price) || price < 0 || !description) { NotificationService.showToast('Please fill all product fields correctly.', 'warning'); return; }
+      try {
+        await DBService.saveProductItem({ ...(productId ? { id: productId } : {}), name, category, price, icon, stockStatus, description, popular, status });
+        window.ModalComponent?.close();
+        NotificationService.showToast(productId ? 'Product updated!' : 'Product created!', 'success');
+        this.renderCatalog();
+      } catch (e) { NotificationService.showToast('Could not save product. Check Firebase connection.', 'error'); }
+    };
+
+    window.deleteProductItem = async (productId) => {
+      if (!confirm('Delete this product? This will remove it from the public shop catalog.')) return;
+      try { await DBService.deleteProductItem(productId); NotificationService.showToast('Product deleted.', 'info'); this.renderCatalog(); }
+      catch (e) { NotificationService.showToast('Could not delete product. Check Firebase connection.', 'error'); }
+    };
+
+    // Keep existing printing-service CRUD handlers available on this tab.
     window.openCatalogModal = async (serviceId = null) => {
       const allItems = await DBService.getServicesCatalog();
       const existing = serviceId ? allItems.find(item => item.id === serviceId) : null;
-
       const modalHTML = `
         <form id="catalog-form" onsubmit="event.preventDefault(); window.saveCatalogForm('${serviceId || ''}');">
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
-            <div class="form-group">
-              <label class="form-label">Service Title *</label>
-              <input type="text" class="form-control" id="cat-title" value="${existing?.title || ''}" placeholder="E.g., Passport Photo Printing" required>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Category *</label>
-              <input type="text" class="form-control" id="cat-category" value="${existing?.category || 'General Printing'}" placeholder="E.g., Document, Binding, Photo" required>
-            </div>
-          </div>
-
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem;">
-            <div class="form-group">
-              <label class="form-label">Starting Price Tag *</label>
-              <input type="text" class="form-control" id="cat-price" value="${existing?.startingPrice || '₹10.00 / unit'}" placeholder="E.g., ₹25.00 / sheet" required>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Icon Emoji</label>
-              <input type="text" class="form-control" id="cat-icon" value="${existing?.icon || '📄'}" placeholder="E.g., 📄, 📸, 📚, 🏷️">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Catalog Status</label>
-              <select class="form-select" id="cat-status">
-                <option value="Active" ${existing?.status !== 'Inactive' ? 'selected' : ''}>Active</option>
-                <option value="Inactive" ${existing?.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Service Description *</label>
-            <textarea class="form-control" id="cat-desc" rows="3" placeholder="Brief description of service offerings for customers..." required>${existing?.description || ''}</textarea>
-          </div>
-
-          <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
-            <input type="checkbox" id="cat-popular" ${existing?.popular ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;">
-            <label for="cat-popular" style="margin:0; font-weight:600; cursor:pointer;">Highlight as "Popular Service" Badge</label>
-          </div>
-
-          <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
-            <button type="button" class="btn btn-secondary" onclick="if(window.ModalComponent) window.ModalComponent.close(); else document.getElementById('active-modal-overlay')?.remove();">Cancel</button>
-            <button type="submit" class="btn btn-success">💾 ${serviceId ? 'Update Service' : 'Create New Service'}</button>
-          </div>
-        </form>
-      `;
-
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;"><div class="form-group"><label class="form-label">Service Title *</label><input type="text" class="form-control" id="cat-title" value="${existing?.title || ''}" required></div><div class="form-group"><label class="form-label">Category *</label><input type="text" class="form-control" id="cat-category" value="${existing?.category || 'General Printing'}" required></div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;"><div class="form-group"><label class="form-label">Starting Price Tag *</label><input type="text" class="form-control" id="cat-price" value="${existing?.startingPrice || '₹10.00 / unit'}" required></div><div class="form-group"><label class="form-label">Icon Emoji</label><input type="text" class="form-control" id="cat-icon" value="${existing?.icon || '📄'}"></div><div class="form-group"><label class="form-label">Status</label><select class="form-select" id="cat-status"><option value="Active" ${existing?.status !== 'Inactive' ? 'selected' : ''}>Active</option><option value="Inactive" ${existing?.status === 'Inactive' ? 'selected' : ''}>Inactive</option></select></div></div>
+          <div class="form-group"><label class="form-label">Description *</label><textarea class="form-control" id="cat-desc" rows="3" required>${existing?.description || ''}</textarea></div>
+          <div class="form-group" style="display:flex;align-items:center;gap:0.5rem;"><input type="checkbox" id="cat-popular" ${existing?.popular ? 'checked' : ''}><label for="cat-popular" style="margin:0;font-weight:600;">Popular Service Badge</label></div>
+          <div style="display:flex;justify-content:flex-end;gap:0.75rem;margin-top:1.5rem;"><button type="button" class="btn btn-secondary" onclick="window.ModalComponent?.close()">Cancel</button><button type="submit" class="btn btn-success">💾 Save Service</button></div>
+        </form>`;
       const modal = ModalComponent || window.ModalComponent;
-      if (modal) {
-        modal.show({
-          title: serviceId ? `✏️ Edit Service Offering` : `➕ Create New Service Offering`,
-          bodyHTML: modalHTML,
-          width: '650px'
-        });
-      }
+      if (modal) modal.show({ title: serviceId ? '✏️ Edit Service' : '➕ Add Service', bodyHTML: modalHTML, width: '650px' });
     };
-
     window.saveCatalogForm = async (serviceId) => {
-      const title = document.getElementById('cat-title')?.value.trim();
-      const category = document.getElementById('cat-category')?.value.trim();
-      const startingPrice = document.getElementById('cat-price')?.value.trim();
-      const icon = document.getElementById('cat-icon')?.value.trim() || '📄';
-      const status = document.getElementById('cat-status')?.value || 'Active';
-      const description = document.getElementById('cat-desc')?.value.trim();
-      const popular = document.getElementById('cat-popular')?.checked || false;
-
-      if (!title || !startingPrice || !description) {
-        NotificationService.showToast('Please fill out all required service fields.', 'warning');
-        return;
-      }
-
-      await DBService.saveCatalogItem({
-        ...(serviceId ? { id: serviceId } : {}),
-        title,
-        category,
-        startingPrice,
-        icon,
-        status,
-        description,
-        popular
-      });
-
-      if (window.ModalComponent) window.ModalComponent.close();
-      NotificationService.showToast(serviceId ? 'Service catalog item updated!' : 'New service offering added!', 'success');
-      this.renderCatalog();
+      const title=document.getElementById('cat-title')?.value.trim(), category=document.getElementById('cat-category')?.value.trim(), startingPrice=document.getElementById('cat-price')?.value.trim(), icon=document.getElementById('cat-icon')?.value.trim()||'📄', status=document.getElementById('cat-status')?.value||'Active', description=document.getElementById('cat-desc')?.value.trim(), popular=document.getElementById('cat-popular')?.checked||false;
+      if (!title || !startingPrice || !description) { NotificationService.showToast('Please fill all required service fields.', 'warning'); return; }
+      await DBService.saveCatalogItem({ ...(serviceId ? {id:serviceId}:{ }), title, category, startingPrice, icon, status, description, popular });
+      window.ModalComponent?.close(); NotificationService.showToast(serviceId ? 'Service updated!' : 'Service created!', 'success'); this.renderCatalog();
     };
-
-    window.deleteCatalogItem = async (serviceId) => {
-      if (confirm('Are you sure you want to delete this service from the catalog?')) {
-        await DBService.deleteCatalogItem(serviceId);
-        NotificationService.showToast('Service deleted from catalog.', 'info');
-        this.renderCatalog();
-      }
-    };
+    window.deleteCatalogItem = async (serviceId) => { if (confirm('Delete this service from the catalog?')) { await DBService.deleteCatalogItem(serviceId); NotificationService.showToast('Service deleted.', 'info'); this.renderCatalog(); } };
   }
 };
