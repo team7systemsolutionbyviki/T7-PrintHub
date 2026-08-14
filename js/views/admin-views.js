@@ -5,6 +5,7 @@
 import { AuthService } from '../services/auth-service.js';
 import { DBService } from '../services/db-service.js';
 import { StorageService } from '../services/storage-service.js';
+import { AWBDispatchService } from '../services/awb-dispatch-service.js';
 import { PricingEngine } from '../services/pricing-engine.js';
 import { NotificationService } from '../services/notification-service.js';
 import { ChartsEngine } from '../components/charts.js';
@@ -523,8 +524,9 @@ export const AdminViews = {
                   </td>
                   <td>
                     <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
-                      <a href="#admin-orders?invoice=${o.id}" class="btn btn-sm btn-secondary" title="View Tax Invoice">🧾 Invoice</a>
+                      <a href="#admin-orders?invoice=${o.id}" class="btn btn-sm btn-secondary" title="View Printing Invoice">🧾 Invoice</a>
                       <button class="btn btn-sm btn-success" onclick="window.sendWhatsAppInvoice('${o.id}')" title="Send Invoice via WhatsApp">💬 WhatsApp</button>
+                      <button class="btn btn-sm btn-primary" onclick="window.openAWBDispatch('${o.id}')" title="Upload/scan AWB and send shipment notification">📦 Dispatch</button>
                       <button class="btn btn-sm btn-danger" onclick="window.deleteOrderRecord('${o.id}')" title="Delete Order Record">🗑️ Delete</button>
                     </div>
                   </td>
@@ -974,6 +976,253 @@ export const AdminViews = {
       }
     };
 
+    // ── AWB DISPATCH / OCR / WHATSAPP ─────────────────────────────────────
+    window.openAWBDispatch = async (orderId) => {
+      const order = await DBService.getOrderById(orderId);
+      if (!order) {
+        NotificationService.showToast('Order not found.', 'error');
+        return;
+      }
+
+      const courier = order.courier || {};
+      const existingSlip = courier.awbSlipUrl || '';
+      const existingAwb = courier.awbNumber || '';
+
+      const modal = document.createElement('div');
+      modal.id = 'awb-dispatch-modal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:10000;display:flex;align-items:center;justify-content:center;padding:1rem;';
+      modal.innerHTML = `
+        <div style="width:min(720px,100%);max-height:92vh;overflow:auto;background:var(--bg-card,#fff);border-radius:18px;border:1px solid var(--border-color,#e2e8f0);box-shadow:0 24px 80px rgba(0,0,0,.25);">
+          <div style="padding:1rem 1.25rem;border-bottom:1px solid var(--border-color,#e2e8f0);display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+            <div>
+              <h3 style="margin:0;">📦 Dispatch Order</h3>
+              <div style="font-size:.78rem;color:var(--text-muted);margin-top:.2rem;">Order ${order.id} • ${order.customerName || 'Customer'}</div>
+            </div>
+            <button id="awb-close" class="btn btn-sm btn-outline">✕</button>
+          </div>
+
+          <div style="padding:1.25rem;display:grid;gap:1rem;">
+            <div class="glass-panel" style="padding:1rem;border-radius:12px;">
+              <div style="font-weight:800;margin-bottom:.65rem;">Courier</div>
+              <select id="awb-courier" class="form-select">
+                <option value="ST Courier" selected>ST Courier</option>
+              </select>
+            </div>
+
+            <div class="glass-panel" style="padding:1rem;border-radius:12px;">
+              <div style="font-weight:800;margin-bottom:.65rem;">📷 AWB Slip</div>
+              <input id="awb-file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" capture="environment" class="form-control">
+              <div id="awb-preview" style="margin-top:.75rem;display:${existingSlip ? 'block' : 'none'};">
+                ${existingSlip ? `<a href="${existingSlip}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">👁️ View Existing AWB Slip</a>` : ''}
+              </div>
+              <div style="font-size:.72rem;color:var(--text-muted);margin-top:.45rem;">JPG/PNG/WEBP/PDF • max 15 MB</div>
+            </div>
+
+            <div class="glass-panel" style="padding:1rem;border-radius:12px;">
+              <div style="font-weight:800;margin-bottom:.65rem;">🔍 AWB Number</div>
+              <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+                <input id="awb-number" class="form-control" value="${existingAwb}" placeholder="Scan/upload slip to detect AWB" style="flex:1;min-width:220px;">
+                <button id="awb-ocr" class="btn btn-secondary" type="button">🔍 Read AWB</button>
+              </div>
+              <div id="awb-confidence" style="font-size:.75rem;color:var(--text-muted);margin-top:.45rem;">Admin must verify the detected number before sending.</div>
+            </div>
+
+            <div class="glass-panel" style="padding:1rem;border-radius:12px;">
+              <div style="font-weight:800;margin-bottom:.65rem;">🧾 Customer Invoice</div>
+              <a href="#admin-orders?invoice=${encodeURIComponent(order.id)}" class="btn btn-sm btn-outline">👁️ Preview Invoice</a>
+              <div style="font-size:.72rem;color:var(--text-muted);margin-top:.45rem;">The customer message includes the secure order/invoice tracking page.</div>
+            </div>
+
+            <div class="glass-panel" style="padding:1rem;border-radius:12px;">
+              <div style="font-weight:800;margin-bottom:.65rem;">🔗 Tracking</div>
+              <div style="font-size:.82rem;">Official ST Courier tracking page</div>
+              <a href="https://www.stcourier.com/track/shipment" target="_blank" rel="noopener" style="font-size:.8rem;">https://www.stcourier.com/track/shipment</a>
+            </div>
+
+            <div id="awb-progress" style="display:none;padding:.8rem 1rem;border-radius:10px;background:rgba(59,130,246,.08);font-weight:700;"></div>
+
+            <div style="display:flex;justify-content:flex-end;gap:.5rem;flex-wrap:wrap;">
+              <button id="awb-save" class="btn btn-secondary">💾 Save Dispatch</button>
+              <button id="awb-send" class="btn btn-success">💬 Save & Open WhatsApp</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      const close = () => modal.remove();
+      document.getElementById('awb-close').onclick = close;
+      modal.addEventListener('click', e => { if (e.target === modal) close(); });
+
+      let selectedFile = null;
+      let uploaded = existingSlip ? {
+        url: courier.awbSlipUrl,
+        storagePath: courier.awbSlipStoragePath || '',
+        fileName: courier.awbSlipFileName || '',
+        mimeType: courier.awbSlipMimeType || ''
+      } : null;
+
+      const fileInput = document.getElementById('awb-file');
+      const numberInput = document.getElementById('awb-number');
+      const confidenceEl = document.getElementById('awb-confidence');
+      const progress = document.getElementById('awb-progress');
+
+      fileInput.onchange = async () => {
+        selectedFile = fileInput.files?.[0] || null;
+        if (!selectedFile) return;
+        confidenceEl.textContent = `Selected ${selectedFile.name}. Click "Read AWB" to run OCR.`;
+      };
+
+      document.getElementById('awb-ocr').onclick = async () => {
+        if (!selectedFile) {
+          NotificationService.showToast('Upload or scan the AWB slip first.', 'warning');
+          return;
+        }
+        const btn = document.getElementById('awb-ocr');
+        btn.disabled = true;
+        btn.textContent = '⏳ Reading...';
+        progress.style.display = 'block';
+        progress.textContent = '🔍 Reading AWB slip...';
+        try {
+          const mod = await import('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js');
+          const { createWorker } = mod;
+          const worker = await createWorker('eng');
+          const result = await worker.recognize(selectedFile);
+          const text = result?.data?.text || '';
+          await worker.terminate();
+
+          const candidates = [];
+          const lines = text.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+          for (const line of lines) {
+            if (/(awb|airway|tracking|consignment|shipment)/i.test(line)) {
+              const nums = line.match(/[A-Z0-9][A-Z0-9\-]{7,24}/gi) || [];
+              nums.forEach(v => candidates.push(v.replace(/[^A-Z0-9]/gi, '')));
+            }
+          }
+          const all = text.match(/[A-Z0-9][A-Z0-9\-]{8,24}/gi) || [];
+          candidates.push(...all.map(v => v.replace(/[^A-Z0-9]/gi, '')));
+          const unique = [...new Set(candidates)].filter(v => /\d/.test(v));
+          if (!unique.length) throw new Error('Could not confidently detect an AWB number. Enter it manually.');
+          numberInput.value = unique[0];
+          confidenceEl.textContent = `⚠️ OCR suggestion: ${unique[0]}. Verify the number before sending.`;
+          progress.textContent = '✅ AWB candidate detected. Please verify it.';
+        } catch (e) {
+          confidenceEl.textContent = '⚠️ OCR could not confidently detect the AWB. Enter it manually.';
+          progress.textContent = `⚠️ ${e.message || 'OCR failed'}`;
+          NotificationService.showToast(e.message || 'OCR failed. Enter AWB manually.', 'warning');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🔍 Read AWB';
+        }
+      };
+
+      const uploadIfNeeded = async () => {
+        if (!selectedFile) return uploaded;
+        progress.style.display = 'block';
+        progress.textContent = '📤 Uploading AWB slip...';
+        uploaded = await AWBDispatchService.uploadAWBSlip(selectedFile, order.id);
+        return uploaded;
+      };
+
+      const getCourierData = async () => {
+        const awb = numberInput.value.trim();
+        if (!awb) throw new Error('AWB number is required.');
+        if (!uploaded?.url) await uploadIfNeeded();
+        if (!uploaded?.url) throw new Error('AWB slip is required.');
+        return {
+          courierName: document.getElementById('awb-courier').value,
+          awbNumber: awb,
+          awbSlipUrl: uploaded.url,
+          awbSlipStoragePath: uploaded.storagePath || '',
+          awbSlipFileName: uploaded.fileName || '',
+          awbSlipMimeType: uploaded.mimeType || selectedFile?.type || '',
+          dispatchDate: new Date().toISOString(),
+          awbVerified: true,
+          awbOcrConfidence: null,
+          whatsappSent: false,
+          whatsappSentAt: null,
+          whatsappMessageId: null,
+          whatsappError: null
+        };
+      };
+
+      document.getElementById('awb-save').onclick = async () => {
+        const btn = document.getElementById('awb-save');
+        btn.disabled = true;
+        try {
+          progress.style.display = 'block';
+          progress.textContent = '💾 Saving dispatch...';
+          const data = await getCourierData();
+          await DBService.updateOrderCourier(order.id, data);
+          NotificationService.showToast(`✅ AWB ${data.awbNumber} saved for ${order.id}.`, 'success');
+          close();
+        } catch (e) {
+          progress.textContent = `❌ ${e.message || 'Save failed'}`;
+          NotificationService.showToast(e.message || 'Dispatch save failed.', 'error');
+        } finally {
+          btn.disabled = false;
+        }
+      };
+
+      document.getElementById('awb-send').onclick = async () => {
+        const btn = document.getElementById('awb-send');
+        if (btn.dataset.busy === '1') return;
+        if (courier.whatsappPrepared) {
+          if (!confirm('WhatsApp was already sent for this dispatch. Send again?')) return;
+        }
+        btn.dataset.busy = '1';
+        btn.disabled = true;
+        try {
+          const data = await getCourierData();
+          progress.style.display = 'block';
+          progress.textContent = '💾 Saving dispatch...';
+          await DBService.updateOrderCourier(order.id, data);
+
+          progress.textContent = '💬 Preparing WhatsApp message...';
+          const invoiceUrl = `${window.location.origin}${window.location.pathname}#track?id=${encodeURIComponent(order.id)}`;
+          const whatsappUrl = AWBDispatchService.buildWhatsAppLink({
+            customerPhone: order.customerPhone,
+            customerName: order.customerName || 'Customer',
+            orderId: order.id,
+            courierName: data.courierName,
+            awbNumber: data.awbNumber,
+            invoiceUrl,
+            trackingUrl: 'https://www.stcourier.com/track/shipment'
+          });
+
+          const sentAt = new Date().toISOString();
+          await DBService.updateOrderCourier(order.id, {
+            ...data,
+            whatsappPrepared: true,
+            whatsappPreparedAt: sentAt,
+            whatsappError: null
+          });
+          await DBService.updateOrderStatus(order.id, 'Dispatched', false);
+
+          // No WhatsApp API/key: open official WhatsApp click-to-chat with the
+          // complete message pre-filled. The admin presses Send in WhatsApp.
+          window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+
+          progress.textContent = '✅ WhatsApp message prepared. Press Send in WhatsApp.';
+          NotificationService.showToast(`✅ Order ${order.id} marked dispatched. WhatsApp is ready to send.`, 'success');
+          setTimeout(close, 900);
+        } catch (e) {
+          console.error('[AWB DISPATCH]', e);
+          try {
+            await DBService.updateOrderCourier(order.id, {
+              whatsappSent: false,
+              whatsappError: e.message || 'WhatsApp send failed'
+            });
+          } catch (_) {}
+          progress.textContent = `❌ ${e.message || 'WhatsApp send failed'}`;
+          NotificationService.showToast(e.message || 'WhatsApp send failed.', 'error');
+        } finally {
+          btn.dataset.busy = '0';
+          btn.disabled = false;
+        }
+      };
+    };
+
     window.sendWhatsAppInvoice = async (orderId) => {
       const [order, settings] = await Promise.all([
         DBService.getOrderById(orderId),
@@ -1010,7 +1259,7 @@ Here is your Order & Payment Invoice from *${settings.shopName || 'TEAM 7 SYSTEM
 💳 *Payment UTR:* ${order.payment?.utr || 'N/A'}
 💰 *Grand Total:* ${orderTotal}
 
-🔍 *View Tax Invoice & Track Order Timeline:*
+🔍 *View Printing Invoice & Track Order Timeline:*
 ${invoiceUrl}
 
 Thank you for choosing ${settings.shopName}!

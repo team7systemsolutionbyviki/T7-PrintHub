@@ -543,6 +543,59 @@ export const DBService = {
   },
 
   // ══════════════════════════════════════════════════════════════════════
+  //  COURIER / AWB DISPATCH
+  // ══════════════════════════════════════════════════════════════════════
+
+  async updateOrderCourier(orderId, courierData) {
+    const orders = _ordersCache || (await this.getOrders());
+    const idx = orders.findIndex(o => o.id === orderId || o.orderId === orderId);
+    const updatedAt = new Date().toISOString();
+    const existing = idx !== -1 ? (orders[idx].courier || {}) : {};
+
+    const courier = {
+      ...existing,
+      ...courierData,
+      updatedAt
+    };
+
+    if (idx !== -1) {
+      orders[idx].courier = courier;
+      orders[idx].updatedAt = updatedAt;
+      _ordersCache = orders;
+    }
+
+    const { db, firebaseApp, isDemo } = svc();
+    if (!isDemo && firebaseApp) {
+      try {
+        const writes = [];
+        if (db) {
+          writes.push((async () => {
+            const { doc, updateDoc } = await fs();
+            await updateDoc(doc(db, 'orders', orderId), {
+              courier,
+              updatedAt
+            });
+          })());
+        }
+        writes.push((async () => {
+          const { getDatabase, ref, update } = await rtdb();
+          const db2 = getDatabase(firebaseApp);
+          await update(ref(db2, 'orders/' + orderId), {
+            courier,
+            updatedAt
+          });
+        })());
+        await Promise.allSettled(writes);
+      } catch (e) {
+        console.warn('[COURIER] Sync error:', e);
+        throw e;
+      }
+    }
+
+    return idx !== -1 ? orders[idx] : { id: orderId, courier };
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
   //  DELETE ORDER — instant memory remove + parallel cloud delete
   // ══════════════════════════════════════════════════════════════════════
 

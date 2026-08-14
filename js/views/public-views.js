@@ -10,6 +10,8 @@ import { StorageService } from '../services/storage-service.js';
 import { NotificationService } from '../services/notification-service.js';
 import { I18nService } from '../services/i18n-service.js';
 import { formatCurrency, getStatusBadgeHTML, formatDate, formatTime } from '../utils/formatters.js';
+import { InvoiceComponent } from '../components/invoice.js';
+import { ModalComponent } from '../components/modal.js';
 
 
 function renderStationeryShowcase(products, settings, compact = false) {
@@ -777,15 +779,25 @@ export const PublicViews = {
 
       // Aggregate pricing across all files using per-file options
       let totalPaper = 0, totalColor = 0, totalBinding = 0, totalLamination = 0;
-      let totalBwPages = 0, totalColorPages = 0;
+      let rawBwPages = 0, rawColorPages = 0;
+      let totalBwPrints = 0, totalColorPrints = 0;
+      let colorPaperRate = 6.00, basePaperRate = 1.50;
+
       state.files.forEach(f => {
         const q = PricingEngine.calculateQuote(f.options, f.pages);
         totalPaper += q.paperCost;
         totalColor += q.colorCost;
         totalBinding += q.bindingCost;
         totalLamination += q.laminationCost;
-        totalBwPages += (q.bwPagesCount || 0) * (q.copies || 1);
-        totalColorPages += (q.colorPagesCount || 0) * (q.copies || 1);
+
+        rawBwPages += (q.bwPagesCount || 0);
+        rawColorPages += (q.colorPagesCount || 0);
+
+        totalBwPrints += (q.bwPagesCount || 0) * (q.copies || 1);
+        totalColorPrints += (q.colorPagesCount || 0) * (q.copies || 1);
+
+        if (q.colorPaperRate) colorPaperRate = q.colorPaperRate;
+        if (q.basePaperRate) basePaperRate = q.basePaperRate;
       });
 
       const deliveryZones = pricing.deliveryZones || {};
@@ -795,7 +807,23 @@ export const PublicViews = {
       const productsCost = products.reduce((sum, p) => sum + ((Number(p.price) || 0) * p.quantity), 0);
       const subtotal = totalPaper + totalColor + totalBinding + totalLamination + deliveryFee + productsCost;
       const total = subtotal;
-      const quote = { paperCost: totalPaper, colorCost: totalColor, bindingCost: totalBinding, laminationCost: totalLamination, deliveryFee, deliveryZone: selectedZoneKey, productsCost, gst: 0, total };
+      const quote = {
+        paperCost: totalPaper,
+        colorCost: totalColor,
+        bindingCost: totalBinding,
+        laminationCost: totalLamination,
+        deliveryFee,
+        deliveryZone: selectedZoneKey,
+        productsCost,
+        gst: 0,
+        total,
+        colorPagesCount: rawColorPages,
+        bwPagesCount: rawBwPages,
+        totalColorPrints,
+        totalBWPrints: totalBwPrints,
+        colorPaperRate,
+        basePaperRate
+      };
 
       const labelPrintCostEl = document.getElementById('label-print-cost');
       if (labelPrintCostEl) {
@@ -1590,6 +1618,24 @@ export const PublicViews = {
               subtotal: (Number(p.price) || 0) * p.quantity
             })),
             pricing: quote,
+            printing: {
+              paperSize: state.files[0]?.options?.paperSize || 'A4',
+              gsm: state.files[0]?.options?.paperQuality || '70 GSM',
+              colorPages: quote.colorPagesCount || 0,
+              colorCopies: state.files[0]?.options?.copies || 1,
+              colorRate: quote.colorPaperRate || 6.00,
+              colorAmount: quote.colorCost || 0,
+              totalColorPrints: quote.totalColorPrints || 0,
+              bwPages: quote.bwPagesCount || 0,
+              bwCopies: state.files[0]?.options?.copies || 1,
+              bwRate: quote.basePaperRate || 1.50,
+              bwAmount: quote.paperCost || 0,
+              totalBWPrints: quote.totalBWPrints || 0,
+              totalPrints: (quote.totalColorPrints || 0) + (quote.totalBWPrints || 0),
+              sides: state.files[0]?.options?.printSide || 'Single',
+              binding: Array.from(new Set(state.files.map(f => f.options?.binding).filter(b => b && b !== 'None'))).join(', ') || 'None',
+              lamination: state.files.some(f => f.options?.lamination === 'Yes') ? 'Yes' : 'None'
+            },
             payment: {
               method: 'UPI QR',
               utr: utr,
@@ -1999,21 +2045,130 @@ export const PublicViews = {
           `}
         </div>
 
-        <!-- Summary info -->
-        <div style="background:var(--bg-card); padding:1rem 1.25rem; border-radius:10px; border:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
-          <div>
-            <span style="font-size:0.85rem; color:var(--text-muted);">Customer:</span> <b>${order.customerName || 'Customer'}</b> (${order.customerPhone || 'N/A'})
-            <div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.25rem;">
-              📄 ${order.files?.length || 1} file(s) attached • ${(order.files?.[0]?.options || order.options)?.paperSize || 'A4'} (${(order.files?.[0]?.options || order.options)?.colorMode || 'B&W'})
+        <!-- Printing summary: use the SAME normalized data as the invoice.
+             Do not derive page count from file count. -->
+        ${(() => {
+          const d = InvoiceComponent.getInvoiceDetails(order, {});
+          const fileCount = Array.isArray(order.files) ? order.files.length : 0;
+          const printRows = [];
+
+          if (d.totalColorPrints > 0) {
+            printRows.push(`
+              <div style="border:1px solid rgba(16,185,129,.25);background:rgba(16,185,129,.05);border-radius:9px;padding:.65rem .75rem;">
+                <div style="font-weight:800;color:#059669;margin-bottom:.35rem;">🎨 COLOR PRINT</div>
+                <div style="display:grid;grid-template-columns:repeat(5,minmax(70px,1fr));gap:.45rem;font-size:.78rem;">
+                  <span><b>Pages</b><br>${d.colorPages}</span>
+                  <span><b>Copies</b><br>${d.colorCopies}</span>
+                  <span><b>Total Prints</b><br>${d.totalColorPrints}</span>
+                  <span><b>Rate</b><br>${formatCurrency(d.colorRate)} / print</span>
+                  <span><b>Amount</b><br>${formatCurrency(d.colorAmount)}</span>
+                </div>
+              </div>
+            `);
+          }
+
+          if (d.totalBWPrints > 0) {
+            printRows.push(`
+              <div style="border:1px solid var(--border-color);background:var(--bg-body);border-radius:9px;padding:.65rem .75rem;">
+                <div style="font-weight:800;margin-bottom:.35rem;">⬛ BLACK & WHITE PRINT</div>
+                <div style="display:grid;grid-template-columns:repeat(5,minmax(70px,1fr));gap:.45rem;font-size:.78rem;">
+                  <span><b>Pages</b><br>${d.bwPages}</span>
+                  <span><b>Copies</b><br>${d.bwCopies}</span>
+                  <span><b>Total Prints</b><br>${d.totalBWPrints}</span>
+                  <span><b>Rate</b><br>${formatCurrency(d.bwRate)} / print</span>
+                  <span><b>Amount</b><br>${formatCurrency(d.bwAmount)}</span>
+                </div>
+              </div>
+            `);
+          }
+
+          const printTypeLabel = d.printType === 'Mixed Color + B&W' ? 'Mixed Color + B&W' : d.printType;
+          return `
+            <div style="background:var(--bg-card);padding:1rem 1.25rem;border-radius:10px;border:1px solid var(--border-color);">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:.85rem;">
+                <div>
+                  <div style="font-size:.85rem;color:var(--text-muted);">Customer:</div>
+                  <b>${order.customerName || 'Customer'}</b> <span style="color:var(--text-muted);">(${order.customerPhone || 'N/A'})</span>
+                </div>
+                <div style="text-align:right;">
+                  <span style="font-size:.8rem;color:var(--text-muted);">Files</span>
+                  <b>${fileCount || 1}</b>
+                </div>
+              </div>
+
+              <div style="font-size:.82rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px;margin-bottom:.55rem;">PRINTING SPECIFICATION</div>
+              <div style="display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:.5rem;margin-bottom:.75rem;">
+                <div style="padding:.55rem .65rem;background:var(--bg-body);border-radius:8px;"><span style="font-size:.7rem;color:var(--text-muted);">Paper Size</span><br><b>${d.paperSize}</b></div>
+                <div style="padding:.55rem .65rem;background:var(--bg-body);border-radius:8px;"><span style="font-size:.7rem;color:var(--text-muted);">Paper GSM</span><br><b>${d.gsm}</b></div>
+                <div style="padding:.55rem .65rem;background:var(--bg-body);border-radius:8px;"><span style="font-size:.7rem;color:var(--text-muted);">Print Type</span><br><b>${printTypeLabel}</b></div>
+                <div style="padding:.55rem .65rem;background:var(--bg-body);border-radius:8px;"><span style="font-size:.7rem;color:var(--text-muted);">Sides</span><br><b>${d.sides}</b></div>
+                <div style="padding:.55rem .65rem;background:var(--bg-body);border-radius:8px;"><span style="font-size:.7rem;color:var(--text-muted);">Binding</span><br><b>${d.binding}</b></div>
+                <div style="padding:.55rem .65rem;background:var(--bg-body);border-radius:8px;"><span style="font-size:.7rem;color:var(--text-muted);">Lamination</span><br><b>${d.lamination}</b></div>
+                <div style="padding:.55rem .65rem;background:var(--primary-light);border-radius:8px;"><span style="font-size:.7rem;color:var(--text-muted);">Pages</span><br><b>${d.totalPages}</b></div>
+                <div style="padding:.55rem .65rem;background:var(--primary-light);border-radius:8px;"><span style="font-size:.7rem;color:var(--text-muted);">Total Copies</span><br><b>${d.totalCopies}</b></div>
+              </div>
+
+              <div style="display:grid;gap:.55rem;">
+                ${printRows.join('')}
+              </div>
+
+              <div style="margin-top:.75rem;padding:.7rem .8rem;border-radius:9px;background:var(--bg-body);display:flex;justify-content:space-between;gap:.75rem;flex-wrap:wrap;font-size:.8rem;">
+                <span><b>Print Summary:</b> Color ${d.totalColorPrints} • B&W ${d.totalBWPrints}</span>
+                <span style="font-weight:800;color:var(--primary);">TOTAL PRINTS: ${d.totalPrints}</span>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end;align-items:center;gap:1rem;margin-top:.8rem;flex-wrap:wrap;">
+                <div style="text-align:right;">
+                  <span style="font-size:.8rem;color:var(--text-muted);">Grand Total:</span>
+                  <div style="font-size:1.35rem;font-weight:800;color:var(--primary);">${formatCurrency(order.pricing?.total)}</div>
+                </div>
+                <button type="button" class="btn btn-sm btn-primary" style="white-space:nowrap;display:inline-flex;align-items:center;gap:.35rem;" onclick="window.openTrackInvoiceModal('${order.id}')">🧾 View Printing Invoice</button>
+              </div>
             </div>
-          </div>
-          <div style="text-align:right;">
-            <span style="font-size:0.85rem; color:var(--text-muted);">Grand Total:</span>
-            <div style="font-size:1.35rem; font-weight:800; color:var(--primary);">${formatCurrency(order.pricing?.total)}</div>
-          </div>
-        </div>
+          `;
+        })()}
       </div>
       `;
+    };
+
+    window.openTrackInvoiceModal = async (orderId) => {
+      const [order, settings] = await Promise.all([
+        DBService.getOrderById(orderId),
+        DBService.getSettings()
+      ]);
+      if (!order) {
+        NotificationService.showToast('Order not found', 'error');
+        return;
+      }
+      const html = InvoiceComponent.renderHTML(order, settings, { customerView: true });
+      const modal = ModalComponent || window.ModalComponent;
+      if (modal?.show) {
+        modal.show({
+          title: `🧾 Printing Invoice - ${order.id}`,
+          bodyHTML: html,
+          width: '840px'
+        });
+        return;
+      }
+
+      // Emergency fallback: the customer can still view the invoice even if
+      // the modal component was not initialized.
+      const existing = document.getElementById('customer-invoice-fallback');
+      existing?.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'customer-invoice-fallback';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);padding:2rem;overflow:auto;';
+      overlay.innerHTML = `
+        <div style="max-width:900px;margin:0 auto;background:var(--bg-card,#fff);border-radius:14px;padding:1rem;min-height:80vh;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <strong>🧾 Printing Invoice - ${order.id}</strong>
+            <button type="button" class="btn btn-sm btn-outline" onclick="document.getElementById('customer-invoice-fallback')?.remove()">✕ Close</button>
+          </div>
+          ${html}
+        </div>
+      `;
+      document.body.appendChild(overlay);
     };
 
     const searchAction = async (isSilentUpdate = false) => {

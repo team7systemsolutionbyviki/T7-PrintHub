@@ -150,7 +150,7 @@ export const INITIAL_ORDERS = [
     options: {
       paperSize: "A4",
       paperQuality: "80 GSM",
-      colorMode: "Black & White",
+      colorMode: "Custom Split",
       printSide: "Double",
       orientation: "Portrait",
       copies: 2,
@@ -158,17 +158,35 @@ export const INITIAL_ORDERS = [
       lamination: "No",
       notes: "Please add clear cover in front."
     },
+    printing: {
+      paperSize: "A4",
+      gsm: "80 GSM",
+      colorPages: 12,
+      colorCopies: 2,
+      colorRate: 6.00,
+      colorAmount: 144.00,
+      totalColorPrints: 24,
+      bwPages: 45,
+      bwCopies: 2,
+      bwRate: 1.35,
+      bwAmount: 121.50,
+      totalBWPrints: 90,
+      totalPrints: 114,
+      sides: "Double Side",
+      binding: "Spiral",
+      lamination: "None"
+    },
     pricing: {
       paperCost: 121.50,
-      colorCost: 0,
+      colorCost: 144.00,
       bindingCost: 70.00,
       laminationCost: 0,
       deliveryFee: 30.00,
       deliveryZone: "Zone 1 (Anna Nagar / Nearby)",
-      subtotal: 221.50,
-      gst: 34.47,
+      subtotal: 365.50,
+      gst: 0,
       discount: 0,
-      total: 225.97
+      total: 365.50
     },
     payment: {
       method: "UPI QR",
@@ -195,7 +213,7 @@ export const INITIAL_ORDERS = [
     options: {
       paperSize: "A4",
       paperQuality: "Glossy",
-      colorMode: "Color",
+      colorMode: "Custom Split",
       printSide: "Single",
       orientation: "Landscape",
       copies: 1,
@@ -203,17 +221,35 @@ export const INITIAL_ORDERS = [
       lamination: "No",
       notes: "High quality color calibration needed."
     },
+    printing: {
+      paperSize: "A4",
+      gsm: "Glossy",
+      colorPages: 25,
+      colorCopies: 1,
+      colorRate: 6.00,
+      colorAmount: 150.00,
+      totalColorPrints: 25,
+      bwPages: 8,
+      bwCopies: 1,
+      bwRate: 1.50,
+      bwAmount: 12.00,
+      totalBWPrints: 8,
+      totalPrints: 33,
+      sides: "Single Side",
+      binding: "Hard",
+      lamination: "None"
+    },
     pricing: {
-      paperCost: 75.00,
-      colorCost: 120.00,
+      paperCost: 12.00,
+      colorCost: 150.00,
       bindingCost: 140.00,
       laminationCost: 0,
       deliveryFee: 50.00,
       deliveryZone: "Zone 2 (Velachery / Central)",
-      subtotal: 385.00,
-      gst: 60.30,
+      subtotal: 352.00,
+      gst: 0,
       discount: 0,
-      total: 395.30
+      total: 352.00
     },
     payment: {
       method: "UPI QR",
