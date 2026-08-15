@@ -2907,9 +2907,17 @@ export const PublicViews = {
           <!-- Creator Section -->
           ${c.enabled !== false ? `
             <div class="glass-panel" style="padding:2rem;margin-bottom:2.5rem;border-radius:18px;background:var(--bg-card);border:1px solid var(--border-color);box-shadow:var(--shadow-md);">
-              <div style="display:flex;gap:2rem;align-items:center;flex-wrap:wrap;">
-                <div style="width:120px;height:120px;border-radius:50%;overflow:hidden;border:3px solid var(--primary);flex-shrink:0;background:#f1f5f9;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(59,130,246,0.25);">
-                  <img src="${creatorAvatarUrl}" alt="${c.name || 'Creator'}" style="width:100%;height:100%;object-fit:cover;" onerror="this.onerror=null;this.src='${defaultAvatarSvg}';" />
+              <div style="display:flex;gap:2rem;align-items:center;flex-wrap:wrap;justify-content:center;">
+                <div style="flex-shrink:0;text-align:center;">
+                  <img src="${creatorAvatarUrl}" alt="Created by Vignesh" class="creator-profile-img" style="width:220px;height:220px;border-radius:50%;object-fit:cover;object-position:center;border:4px solid var(--primary);box-shadow:0 8px 24px rgba(59,130,246,0.25);background:#f1f5f9;display:block;margin:0 auto;" onerror="this.onerror=null;this.src='${defaultAvatarSvg}';" />
+                  <style>
+                    @media (max-width: 768px) {
+                      .creator-profile-img {
+                        width: 160px !important;
+                        height: 160px !important;
+                      }
+                    }
+                  </style>
                 </div>
                 <div style="flex:1;min-width:260px;">
                   <span class="badge badge-approved" style="font-size:0.75rem;margin-bottom:0.4rem;">${c.role || 'Developer & Creator'}</span>

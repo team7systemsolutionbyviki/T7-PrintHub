@@ -306,6 +306,7 @@ export const DEFAULT_ABOUT_PAGE = {
     role: "Developer & Creator",
     description: "This application was created by Vignesh. T7 Print Hub is a practical digital platform to bring printing, creative design, shop products and local service requests together in a simple customer-friendly experience.",
     imageUrl: "",
+    imageStoragePath: "",
     phone: "9360039283",
     whatsapp: "919360039283",
     callBtnText: "📞 Contact Vignesh — 9360039283",

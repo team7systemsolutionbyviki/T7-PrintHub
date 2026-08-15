@@ -2675,21 +2675,26 @@ Thank you for choosing ${settings.shopName}!
               </div>
 
               <!-- Creator Photo Uploader -->
-              <div style="display:grid; grid-template-columns:140px 1fr; gap:1.5rem; align-items:center; background:var(--primary-light); padding:1.25rem; border-radius:12px; margin-bottom:1.25rem; border:1px solid var(--border-color);">
+              <div style="display:grid; grid-template-columns:160px 1fr; gap:1.5rem; align-items:center; background:var(--primary-light); padding:1.25rem; border-radius:12px; margin-bottom:1.25rem; border:1px solid var(--border-color);">
                 <div style="text-align:center;">
-                  <div style="width:110px; height:110px; border-radius:50%; overflow:hidden; border:3px solid var(--primary); background:white; margin:0 auto; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow-md);">
-                    <img id="abt-creator-img-preview" src="${previewImgUrl}" alt="Creator Photo" style="width:100%; height:100%; object-fit:cover;" onerror="this.onerror=null;this.src='${defaultAvatarSvg}';" />
+                  <div style="width:130px; height:130px; border-radius:50%; overflow:hidden; border:4px solid var(--primary); background:white; margin:0 auto; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow-md);">
+                    <img id="abt-creator-img-preview" src="${previewImgUrl}" alt="Creator Photo" style="width:100%; height:100%; object-fit:cover; object-position:center;" onerror="this.onerror=null;this.src='${defaultAvatarSvg}';" />
                   </div>
-                  <span style="font-size:0.72rem; color:var(--text-muted); margin-top:0.35rem; display:block;">Creator Photo</span>
+                  <span id="abt-creator-upload-status" style="font-size:0.75rem; color:var(--text-muted); margin-top:0.4rem; font-weight:600; display:block;">
+                    ${c.imageUrl ? '✅ Saved in Firebase' : 'Default Avatar'}
+                  </span>
                 </div>
 
                 <div>
-                  <h5 style="margin:0 0 0.35rem; font-size:0.95rem;">Creator Image / Photo Uploader</h5>
-                  <p class="text-muted" style="font-size:0.8rem; margin:0 0 0.85rem;">Upload JPG, JPEG, PNG, or WEBP image (max 5MB). Recommended: 500×500 square photo.</p>
+                  <h5 style="margin:0 0 0.35rem; font-size:0.95rem; font-weight:700;">Creator Image Component</h5>
+                  <p class="text-muted" style="font-size:0.8rem; margin:0 0 0.85rem;">
+                    Upload JPG, JPEG, PNG, or WEBP photo (max 10MB). Recommended: 500×500 or 800×800 square photo.
+                  </p>
                   <div style="display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;">
                     <input type="file" id="abt-creator-file-input" accept="image/jpeg,image/png,image/webp,image/jpg" style="display:none;">
-                    <button type="button" class="btn btn-sm btn-primary" id="btn-trigger-creator-photo">📁 Choose Photo</button>
-                    <button type="button" class="btn btn-sm btn-danger" id="abt-creator-img-remove">🗑️ Remove Photo</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="btn-trigger-creator-photo">📁 Choose Image</button>
+                    <button type="button" class="btn btn-sm btn-success" id="abt-creator-upload-btn">⚡ Upload / Save Image</button>
+                    <button type="button" class="btn btn-sm btn-danger" id="abt-creator-img-remove">🗑️ Remove Image</button>
                   </div>
                 </div>
               </div>
@@ -2893,6 +2898,35 @@ Thank you for choosing ${settings.shopName}!
       };
     };
 
+    const executeCreatorImageUpload = async () => {
+      if (!pendingCreatorFile) return null;
+      const statusEl = document.getElementById('abt-creator-upload-status');
+      if (statusEl) statusEl.textContent = '⏳ Uploading to Firebase Storage...';
+
+      try {
+        const uploadResult = await StorageService.uploadCreatorImage(pendingCreatorFile);
+        if (!uploadResult || !uploadResult.downloadURL) {
+          throw new Error('Firebase Storage did not return a valid download URL.');
+        }
+
+        workingData.creator.imageUrl = uploadResult.downloadURL;
+        workingData.creator.imageStoragePath = uploadResult.storagePath || '';
+        pendingCreatorFile = null;
+
+        const imgEl = document.getElementById('abt-creator-img-preview');
+        if (imgEl) imgEl.src = uploadResult.downloadURL + (uploadResult.downloadURL.includes('?') ? '&' : '?') + 't=' + Date.now();
+        if (statusEl) statusEl.textContent = '✅ Image uploaded successfully!';
+
+        NotificationService.showToast('Image uploaded successfully', 'success');
+        return uploadResult;
+      } catch (uploadErr) {
+        console.error('[CREATOR IMAGE] Upload error:', uploadErr);
+        if (statusEl) statusEl.textContent = '❌ Upload failed!';
+        NotificationService.showToast(`Creator image upload failed: ${uploadErr.message || 'Storage error'}`, 'error');
+        throw uploadErr;
+      }
+    };
+
     const attachEvents = () => {
       document.getElementById('btn-trigger-creator-photo')?.addEventListener('click', () => {
         document.getElementById('abt-creator-file-input')?.click();
@@ -2903,33 +2937,87 @@ Thank you for choosing ${settings.shopName}!
         if (!file) return;
         const type = String(file.type || '').toLowerCase();
         if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(file.name || '')) {
-          NotificationService.showToast('Please select a valid JPG, PNG, or WEBP image file.', 'warning');
+          NotificationService.showToast('Invalid file: Image file must be JPG, JPEG, PNG, or WEBP.', 'error');
+          e.target.value = '';
           return;
         }
-        if (file.size > 5 * 1024 * 1024) {
-          NotificationService.showToast('Image file size must be 5MB or smaller.', 'warning');
+        if (file.size > 10 * 1024 * 1024) {
+          NotificationService.showToast('Invalid file: Image file size must be 10MB or smaller.', 'error');
+          e.target.value = '';
           return;
         }
 
         try {
           const previewUrl = await StorageService.readFileAsDataURL(file);
           const imgEl = document.getElementById('abt-creator-img-preview');
+          const statusEl = document.getElementById('abt-creator-upload-status');
           if (imgEl) imgEl.src = previewUrl;
+          if (statusEl) statusEl.textContent = `📁 Ready: ${file.name} (${StorageService.formatBytes(file.size)})`;
           pendingCreatorFile = file;
-          NotificationService.showToast('Photo selected! Click "Save Changes" to save photo.', 'info');
+          NotificationService.showToast('Image selected! Click "Upload / Save Image" to upload to Firebase.', 'info');
         } catch (err) {
-          console.error('[ABOUT] Preview failed:', err);
+          console.error('[ABOUT] Local preview failed:', err);
           NotificationService.showToast('Failed to preview image file.', 'error');
         }
       });
 
-      document.getElementById('abt-creator-img-remove')?.addEventListener('click', () => {
+      document.getElementById('abt-creator-upload-btn')?.addEventListener('click', async () => {
+        readFormValues();
+        const btn = document.getElementById('abt-creator-upload-btn');
+        if (!pendingCreatorFile) {
+          if (workingData.creator.imageUrl) {
+            NotificationService.showToast('Creator image is already uploaded to Firebase Storage.', 'info');
+          } else {
+            NotificationService.showToast('Please choose an image file first.', 'warning');
+          }
+          return;
+        }
+
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Uploading...';
+
+        try {
+          await executeCreatorImageUpload();
+          savedData = await DBService.saveAboutPage(workingData);
+          await renderUI();
+        } catch (err) {
+          // Toast handled in executeCreatorImageUpload
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+          }
+        }
+      });
+
+      document.getElementById('abt-creator-img-remove')?.addEventListener('click', async () => {
+        if (!confirm("Remove creator image?")) return;
+        readFormValues();
+
+        const statusEl = document.getElementById('abt-creator-upload-status');
+        if (statusEl) statusEl.textContent = '⏳ Deleting image...';
+
+        if (workingData.creator.imageStoragePath) {
+          try {
+            await StorageService.deleteFileByPath(workingData.creator.imageStoragePath);
+          } catch (e) {
+            console.warn('[CREATOR IMAGE] Storage deletion warning:', e);
+          }
+        }
+
         pendingCreatorFile = null;
         workingData.creator.imageUrl = '';
-        const defaultAvatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%233b82f6"><circle cx="50" cy="35" r="22"/><path d="M15,88 C15,65 30,55 50,55 C70,55 85,65 85,88 Z"/></svg>`;
-        const imgEl = document.getElementById('abt-creator-img-preview');
-        if (imgEl) imgEl.src = defaultAvatarSvg;
-        NotificationService.showToast('Photo removed. Default avatar will be displayed on save.', 'info');
+        workingData.creator.imageStoragePath = '';
+
+        try {
+          savedData = await DBService.saveAboutPage(workingData);
+          NotificationService.showToast('Creator image removed.', 'info');
+          await renderUI();
+        } catch (err) {
+          console.error('[CREATOR IMAGE] Remove save error:', err);
+          NotificationService.showToast('Failed to update Firestore after image removal.', 'error');
+        }
       });
 
       document.getElementById('abt-add-service-btn')?.addEventListener('click', () => {
@@ -3057,14 +3145,7 @@ Thank you for choosing ${settings.shopName}!
 
         try {
           if (pendingCreatorFile) {
-            try {
-              const uploaded = await StorageService.uploadCatalogImage(pendingCreatorFile, 'about', 'creator');
-              workingData.creator.imageUrl = uploaded.url || uploaded.downloadURL || uploaded.dataUrl || '';
-            } catch (imgErr) {
-              console.warn('[ABOUT] Storage upload warning, fallback to dataUrl:', imgErr);
-              const dataUrl = await StorageService.readFileAsDataURL(pendingCreatorFile);
-              workingData.creator.imageUrl = dataUrl || '';
-            }
+            await executeCreatorImageUpload();
           }
 
           savedData = await DBService.saveAboutPage(workingData);

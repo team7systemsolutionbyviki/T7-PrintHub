@@ -47,6 +47,14 @@ service firebase.storage {
       allow delete: if true;
     }
 
+    // Creator image & About assets path: about/{allPaths=**}
+    match /about/{allPaths=**} {
+      allow write: if request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/(jpeg|jpg|png|gif|webp)');
+      allow read: if true;
+      allow delete: if true;
+    }
+
     // Default fallback paths for general shop assets
     match /uploads/{fileName} {
       allow read, write: if true;

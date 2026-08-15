@@ -428,6 +428,47 @@ export const StorageService = {
     return { url:dataUrl, downloadURL:dataUrl, storagePath:'', name:file.name, idbKey };
   },
 
+  // Permanent creator image upload to about/creator/ path
+  async uploadCreatorImage(file) {
+    if (!file) throw new Error('Please select an image file.');
+    const type = String(file.type || '').toLowerCase();
+    if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(file.name || '')) {
+      throw new Error('Only JPG, JPEG, PNG, and WEBP image files are allowed.');
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error('Image file size must be 10MB or smaller.');
+    }
+
+    const idbKey = 'creator_image_' + Date.now();
+    await this.saveToIDB(idbKey, file);
+
+    const cleanName = String(file.name || 'creator.webp').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `about/creator/${Date.now()}_${cleanName}`;
+
+    const { storage, isDemo } = getServices();
+    if (!isDemo && storage) {
+      try {
+        if (!firebaseStorageModule) {
+          firebaseStorageModule = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js');
+        }
+        const { ref, uploadBytes, getDownloadURL } = firebaseStorageModule;
+        const fileRef = ref(storage, storagePath);
+        await uploadBytes(fileRef, file, {
+          contentType: file.type || 'image/webp',
+          cacheControl: 'public,max-age=31536000'
+        });
+        const url = await getDownloadURL(fileRef);
+        return { url, downloadURL: url, storagePath, name: file.name, idbKey };
+      } catch (e) {
+        console.warn('[CREATOR IMAGE] Firebase upload failed:', e);
+        throw new Error('Creator image upload failed: ' + (e.message || 'Firebase Storage error'));
+      }
+    }
+
+    const dataUrl = await this.readFileAsDataURL(file);
+    return { url: dataUrl, downloadURL: dataUrl, storagePath: '', name: file.name, idbKey };
+  },
+
   // Delete a file from Firebase Storage by its storagePath
   async deleteFileByPath(storagePath) {
     if (!storagePath || storagePath === '') return false;
