@@ -469,6 +469,48 @@ export const StorageService = {
     return { url: dataUrl, downloadURL: dataUrl, storagePath: '', name: file.name, idbKey };
   },
 
+  // Dedicated payment proof upload to payments/{orderId}/{filename} path
+  async uploadPaymentProof(file, orderId = 'temp') {
+    if (!file) throw new Error('Please select a payment proof image.');
+    const type = String(file.type || '').toLowerCase();
+    if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(file.name || '')) {
+      throw new Error('Only JPG, JPEG, PNG, and WEBP payment proof images are allowed.');
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error('Payment screenshot must be 10MB or smaller.');
+    }
+
+    const idbKey = 'payment_proof_' + Date.now();
+    await this.saveToIDB(idbKey, file);
+
+    const safeId = String(orderId || 'temp').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanName = String(file.name || 'proof.webp').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `payments/${safeId}/${Date.now()}_${cleanName}`;
+
+    const { storage, isDemo } = getServices();
+    if (!isDemo && storage) {
+      try {
+        if (!firebaseStorageModule) {
+          firebaseStorageModule = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js');
+        }
+        const { ref, uploadBytes, getDownloadURL } = firebaseStorageModule;
+        const fileRef = ref(storage, storagePath);
+        await uploadBytes(fileRef, file, {
+          contentType: file.type || 'image/webp',
+          cacheControl: 'public,max-age=31536000'
+        });
+        const url = await getDownloadURL(fileRef);
+        return { url, downloadURL: url, storagePath, name: file.name, idbKey };
+      } catch (e) {
+        console.warn('[PAYMENT PROOF] Firebase upload failed:', e);
+        throw new Error('Payment proof upload failed: ' + (e.message || 'Firebase Storage error'));
+      }
+    }
+
+    const dataUrl = await this.readFileAsDataURL(file);
+    return { url: dataUrl, downloadURL: dataUrl, storagePath: '', name: file.name, idbKey };
+  },
+
   // Delete a file from Firebase Storage by its storagePath
   async deleteFileByPath(storagePath) {
     if (!storagePath || storagePath === '') return false;

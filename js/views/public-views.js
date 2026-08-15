@@ -682,7 +682,11 @@ export const PublicViews = {
 
                   <div class="form-group">
                     <label class="form-label">${I18nService.t('screenshot_label')}</label>
-                    <input type="file" class="form-control" id="pay-screenshot" accept="image/*">
+                    <input type="file" class="form-control" id="pay-screenshot" accept="image/jpeg,image/png,image/webp,image/jpg">
+                    <div id="pay-screenshot-preview-container" style="display:none; margin-top:0.75rem; text-align:center; background:var(--primary-light); padding:0.75rem; border-radius:10px; border:1px solid var(--border-color);">
+                      <img id="pay-screenshot-img-preview" src="" alt="Payment Proof Preview" style="max-width:100%; max-height:180px; border-radius:8px; border:1.5px solid var(--primary); object-fit:contain; display:inline-block;" />
+                      <span style="display:block; font-size:0.75rem; color:var(--text-muted); margin-top:0.35rem; font-weight:600;">🖼️ Payment Proof Preview (Ready to submit)</span>
+                    </div>
                   </div>
 
                   <div class="flex justify-between mt-4">
@@ -1754,6 +1758,37 @@ export const PublicViews = {
 
     // Per-file options update via global helpers (already handled inline via window.updateFileOption)
 
+    document.getElementById('pay-screenshot')?.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      const container = document.getElementById('pay-screenshot-preview-container');
+      const img = document.getElementById('pay-screenshot-img-preview');
+      if (!file) {
+        if (container) container.style.display = 'none';
+        return;
+      }
+      const type = String(file.type || '').toLowerCase();
+      if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(file.name || '')) {
+        NotificationService.showToast('Invalid file format: Payment proof must be JPG, JPEG, PNG, or WEBP.', 'error');
+        e.target.value = '';
+        if (container) container.style.display = 'none';
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        NotificationService.showToast('Payment proof image size must be 10MB or smaller.', 'error');
+        e.target.value = '';
+        if (container) container.style.display = 'none';
+        return;
+      }
+
+      try {
+        const dataUrl = await StorageService.readFileAsDataURL(file);
+        if (img) img.src = dataUrl;
+        if (container) container.style.display = 'block';
+      } catch (err) {
+        console.warn('Payment proof local preview failed:', err);
+      }
+    });
+
     // Submit Order
     const btnSubmit = document.getElementById('btn-submit-final-order');
     if (btnSubmit) {
@@ -1817,7 +1852,6 @@ export const PublicViews = {
           display: flex; align-items: center; justify-content: center;
           animation: fadeInOverlay 0.35s ease;
         `;
-        // Inject keyframes if not already present
         if (!document.getElementById('overlay-anim-style')) {
           const style = document.createElement('style');
           style.id = 'overlay-anim-style';
@@ -1863,17 +1897,40 @@ export const PublicViews = {
 
         try {
           let screenshotUrl = '';
+          let screenshotStoragePath = '';
           let screenshotIdbKey = '';
           let screenshotDataUrl = '';
           if (screenshotInput && screenshotInput.files && screenshotInput.files[0]) {
+            const screenshotFile = screenshotInput.files[0];
+            const type = String(screenshotFile.type || '').toLowerCase();
+            if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(screenshotFile.name || '')) {
+              if (loadingOverlay) loadingOverlay.remove();
+              btnSubmit.disabled = false;
+              btnSubmit.innerHTML = originalText;
+              NotificationService.showToast('Invalid file format: Payment proof must be JPG, JPEG, PNG, or WEBP.', 'error');
+              return;
+            }
+            if (screenshotFile.size > 10 * 1024 * 1024) {
+              if (loadingOverlay) loadingOverlay.remove();
+              btnSubmit.disabled = false;
+              btnSubmit.innerHTML = originalText;
+              NotificationService.showToast('Payment proof image size must be 10MB or smaller.', 'error');
+              return;
+            }
+
             try {
-              const screenshotFile = screenshotInput.files[0];
               screenshotDataUrl = await StorageService.readFileAsDataURL(screenshotFile);
-              const uploaded = await StorageService.uploadFile(screenshotFile, 'receipts');
-              screenshotUrl = uploaded.url || screenshotDataUrl || '';
+              const uploaded = await StorageService.uploadPaymentProof(screenshotFile, 'ORD-PENDING');
+              screenshotUrl = uploaded.url || uploaded.downloadURL || '';
+              screenshotStoragePath = uploaded.storagePath || '';
               screenshotIdbKey = uploaded.idbKey || '';
             } catch (err) {
-              console.warn('Screenshot processing failed, proceeding with dataUrl:', err);
+              console.error('[PAYMENT PROOF] Upload error:', err);
+              if (loadingOverlay) loadingOverlay.remove();
+              btnSubmit.disabled = false;
+              btnSubmit.innerHTML = originalText;
+              NotificationService.showToast(`Payment proof upload failed: ${err.message || 'Storage error'}`, 'error');
+              return;
             }
           }
 
@@ -1939,14 +1996,20 @@ export const PublicViews = {
               customerDeliveryCharge: quote.deliveryFee || 0,
               deliveryType: quote.deliveryType || 'FREE'
             },
+            paymentScreenshotUrl: screenshotUrl || screenshotDataUrl,
+            paymentScreenshotStoragePath: screenshotStoragePath,
+            paymentStatus: screenshotUrl ? 'Proof Submitted' : 'Waiting Verification',
             payment: {
               method: 'UPI QR',
               utr: utr,
               payerName: payerName,
               screenshotUrl: screenshotUrl || screenshotDataUrl,
+              screenshotStoragePath: screenshotStoragePath,
+              paymentScreenshotUrl: screenshotUrl || screenshotDataUrl,
+              paymentScreenshotStoragePath: screenshotStoragePath,
               screenshotDataUrl: screenshotDataUrl,
               screenshotIdbKey: screenshotIdbKey,
-              status: 'Waiting Verification'
+              status: screenshotUrl ? 'Proof Submitted' : 'Waiting Verification'
             }
           });
 
@@ -2884,7 +2947,11 @@ export const PublicViews = {
 
     const c = data.creator || {};
     const defaultAvatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%233b82f6"><circle cx="50" cy="35" r="22"/><path d="M15,88 C15,65 30,55 50,55 C70,55 85,65 85,88 Z"/></svg>`;
-    const creatorAvatarUrl = c.imageUrl && c.imageUrl.trim() ? c.imageUrl : defaultAvatarSvg;
+    let rawImg = (c.imageUrl && typeof c.imageUrl === 'string') ? c.imageUrl.trim() : '';
+    if (rawImg.includes('object-fit:') || rawImg.includes('border-radius:') || rawImg.includes('<style')) {
+      rawImg = '';
+    }
+    const creatorAvatarUrl = rawImg ? rawImg : defaultAvatarSvg;
     const cleanWa = (c.whatsapp || c.phone || '').replace(/\D/g, '');
     const waLink = cleanWa ? `https://wa.me/${cleanWa.length === 10 ? '91' + cleanWa : cleanWa}?text=${encodeURIComponent('Hi Vignesh! I have an inquiry from T7 Print Hub.')}` : '#contact';
     const telLink = c.phone ? `tel:${c.phone}` : '#contact';
@@ -2906,18 +2973,16 @@ export const PublicViews = {
 
           <!-- Creator Section -->
           ${c.enabled !== false ? `
-            <div class="glass-panel" style="padding:2rem;margin-bottom:2.5rem;border-radius:18px;background:var(--bg-card);border:1px solid var(--border-color);box-shadow:var(--shadow-md);">
-              <div style="display:flex;gap:2rem;align-items:center;flex-wrap:wrap;justify-content:center;">
-                <div style="flex-shrink:0;text-align:center;">
-                  <img src="${creatorAvatarUrl}" alt="Created by Vignesh" class="creator-profile-img" style="width:220px;height:220px;border-radius:50%;object-fit:cover;object-position:center;border:4px solid var(--primary);box-shadow:0 8px 24px rgba(59,130,246,0.25);background:#f1f5f9;display:block;margin:0 auto;" onerror="this.onerror=null;this.src='${defaultAvatarSvg}';" />
-                  <style>
-                    @media (max-width: 768px) {
-                      .creator-profile-img {
-                        width: 160px !important;
-                        height: 160px !important;
-                      }
-                    }
-                  </style>
+            <div class="glass-panel about-creator-card" style="padding:2rem;margin-bottom:2.5rem;border-radius:18px;background:var(--bg-card);border:1px solid var(--border-color);box-shadow:var(--shadow-md);">
+              <div class="about-creator-card-content" style="display:flex;gap:2rem;align-items:center;flex-wrap:wrap;justify-content:center;">
+                <div class="about-creator-image-wrapper">
+                  <img
+                    id="about-creator-image"
+                    class="about-creator-image"
+                    src="${creatorAvatarUrl}"
+                    alt="Created by Vignesh"
+                    onerror="this.onerror=null;this.src='${defaultAvatarSvg}';"
+                  />
                 </div>
                 <div style="flex:1;min-width:260px;">
                   <span class="badge badge-approved" style="font-size:0.75rem;margin-bottom:0.4rem;">${c.role || 'Developer & Creator'}</span>
@@ -2925,7 +2990,7 @@ export const PublicViews = {
                   <p class="text-muted" style="margin:0;line-height:1.7;font-size:0.95rem;">
                     ${c.description}
                   </p>
-                  <div style="display:flex;gap:0.85rem;flex-wrap:wrap;margin-top:1.25rem;">
+                  <div class="about-creator-buttons" style="display:flex;gap:0.85rem;flex-wrap:wrap;margin-top:1.25rem;">
                     <a href="${telLink}" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:0.4rem;">${c.callBtnText || `📞 Contact ${c.name} — ${c.phone}`}</a>
                     <a href="${waLink}" target="_blank" rel="noopener" class="btn btn-success" style="display:inline-flex;align-items:center;gap:0.4rem;background:#10b981;border-color:#10b981;color:white;">${c.whatsappBtnText || '💬 WhatsApp Vignesh'}</a>
                   </div>

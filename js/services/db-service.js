@@ -544,6 +544,76 @@ export const DBService = {
     return idx !== -1 ? orders[idx] : { id: orderId, status: newStatus, orderStatus: newStatus };
   },
 
+  async updatePaymentStatus(orderId, newPaymentStatus, rejectionReason = '') {
+    const orders = _ordersCache || (await this.getOrders());
+    const idx = orders.findIndex(o => o.id === orderId || o.orderId === orderId);
+
+    const updatedAt = new Date().toISOString();
+    let orderStatusUpdate = null;
+    if (newPaymentStatus === 'Verified') orderStatusUpdate = 'Payment Approved';
+    if (newPaymentStatus === 'Rejected') orderStatusUpdate = 'Rejected';
+
+    if (idx !== -1) {
+      orders[idx].paymentStatus = newPaymentStatus;
+      if (!orders[idx].payment) orders[idx].payment = {};
+      orders[idx].payment.status = newPaymentStatus;
+      orders[idx].updatedAt = updatedAt;
+      if (rejectionReason) orders[idx].rejectionReason = rejectionReason;
+      if (orderStatusUpdate) {
+        orders[idx].status = orderStatusUpdate;
+        orders[idx].orderStatus = orderStatusUpdate;
+        if (orderStatusUpdate === 'Rejected') orders[idx].isStatusLocked = true;
+      }
+      _ordersCache = orders;
+    }
+
+    const fsUpdateObj = {
+      paymentStatus: newPaymentStatus,
+      'payment.status': newPaymentStatus,
+      updatedAt
+    };
+    if (rejectionReason) fsUpdateObj.rejectionReason = rejectionReason;
+    if (orderStatusUpdate) {
+      fsUpdateObj.status = orderStatusUpdate;
+      fsUpdateObj.orderStatus = orderStatusUpdate;
+      if (orderStatusUpdate === 'Rejected') fsUpdateObj.isStatusLocked = true;
+    }
+
+    const rtdbUpdateObj = {
+      paymentStatus: newPaymentStatus,
+      'payment/status': newPaymentStatus,
+      updatedAt
+    };
+    if (rejectionReason) rtdbUpdateObj.rejectionReason = rejectionReason;
+    if (orderStatusUpdate) {
+      rtdbUpdateObj.status = orderStatusUpdate;
+      rtdbUpdateObj.orderStatus = orderStatusUpdate;
+      if (orderStatusUpdate === 'Rejected') rtdbUpdateObj.isStatusLocked = true;
+    }
+
+    const { db, firebaseApp, isDemo } = svc();
+    if (!isDemo && firebaseApp) {
+      try {
+        await Promise.allSettled([
+          db ? (async () => {
+            const { doc, updateDoc } = await fs();
+            await updateDoc(doc(db, 'orders', orderId), fsUpdateObj);
+          })() : Promise.resolve(),
+          (async () => {
+            const { getDatabase, ref, update } = await rtdb();
+            const db2 = getDatabase(firebaseApp);
+            await update(ref(db2, 'orders/' + orderId), rtdbUpdateObj);
+          })()
+        ]);
+      } catch (e) {
+        console.warn('Cloud update payment status:', e);
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('ordersUpdated', { detail: _ordersCache }));
+    return idx !== -1 ? orders[idx] : null;
+  },
+
   // ══════════════════════════════════════════════════════════════════════
   //  COURIER / AWB DISPATCH
   // ══════════════════════════════════════════════════════════════════════
@@ -598,32 +668,167 @@ export const DBService = {
   },
 
   // ══════════════════════════════════════════════════════════════════════
-  //  DELETE ORDER — instant memory remove + parallel cloud delete
+  //  ARCHIVE / DELETE ORDER & RESTORE
   // ══════════════════════════════════════════════════════════════════════
 
-  deleteOrder(orderId) {
-    // Instant memory remove
-    if (_ordersCache) _ordersCache = _ordersCache.filter(o => o.id !== orderId);
+  async deleteOrder(orderId, adminName = 'Admin') {
+    const orders = _ordersCache || (await this.getOrders());
+    const idx = orders.findIndex(o => o.id === orderId || o.orderId === orderId);
 
-    // Parallel Firebase deletes (non-blocking)
-    (async () => {
-      const { db, firebaseApp, isDemo } = svc();
-      if (!isDemo && firebaseApp) {
+    const deletedAt = new Date().toISOString();
+    let orderToArchive = null;
+
+    if (idx !== -1) {
+      const existing = orders[idx];
+      existing.deleted = true;
+      existing.deletedAt = deletedAt;
+      existing.deletedBy = adminName;
+      existing.previousStatus = existing.status || existing.orderStatus || 'Waiting Verification';
+      existing.status = 'Deleted';
+      existing.orderStatus = 'Deleted';
+      orderToArchive = { ...existing };
+      _ordersCache[idx] = existing;
+    }
+
+    if (!orderToArchive) {
+      orderToArchive = {
+        id: orderId,
+        orderId,
+        deleted: true,
+        deletedAt,
+        deletedBy: adminName,
+        status: 'Deleted',
+        orderStatus: 'Deleted'
+      };
+    }
+
+    // Update main order doc to deleted: true AND copy to deletedOrders collection
+    const { db, firebaseApp, isDemo } = svc();
+    if (!isDemo && firebaseApp) {
+      const fsUpdateObj = {
+        deleted: true,
+        deletedAt,
+        deletedBy: adminName,
+        previousStatus: orderToArchive.previousStatus || 'Waiting Verification',
+        status: 'Deleted',
+        orderStatus: 'Deleted'
+      };
+
+      const rtdbUpdateObj = {
+        deleted: true,
+        deletedAt,
+        deletedBy: adminName,
+        previousStatus: orderToArchive.previousStatus || 'Waiting Verification',
+        status: 'Deleted',
+        orderStatus: 'Deleted'
+      };
+
+      try {
         await Promise.allSettled([
           db ? (async () => {
-            const { doc, deleteDoc } = await fs();
-            await deleteDoc(doc(db, 'orders', orderId));
+            const { doc, updateDoc, setDoc } = await fs();
+            await updateDoc(doc(db, 'orders', orderId), fsUpdateObj);
+            // Copy full order to archive collection `deletedOrders`
+            await setDoc(doc(db, 'deletedOrders', orderId), this.sanitizeForCloud({
+              ...orderToArchive,
+              originalOrderId: orderId,
+              archivedAt: deletedAt
+            }, true));
           })() : Promise.resolve(),
           (async () => {
-            const { getDatabase, ref, remove } = await rtdb();
+            const { getDatabase, ref, update, set } = await rtdb();
             const db2 = getDatabase(firebaseApp);
-            await remove(ref(db2, 'orders/' + orderId));
+            await update(ref(db2, 'orders/' + orderId), rtdbUpdateObj);
+            await set(ref(db2, 'deletedOrders/' + orderId), this.sanitizeForCloud({
+              ...orderToArchive,
+              originalOrderId: orderId,
+              archivedAt: deletedAt
+            }, false));
           })()
         ]);
+      } catch (e) {
+        console.warn('Cloud archive order error:', e);
       }
-    })();
+    }
 
+    window.dispatchEvent(new CustomEvent('ordersUpdated', { detail: _ordersCache }));
     return true;
+  },
+
+  async restoreOrder(orderId) {
+    const orders = _ordersCache || (await this.getOrders());
+    const idx = orders.findIndex(o => o.id === orderId || o.orderId === orderId);
+
+    const updatedAt = new Date().toISOString();
+    let restoredStatus = 'Waiting Verification';
+
+    if (idx !== -1) {
+      const existing = orders[idx];
+      restoredStatus = existing.previousStatus && existing.previousStatus !== 'Deleted' ? existing.previousStatus : 'Waiting Verification';
+      existing.deleted = false;
+      existing.deletedAt = null;
+      existing.deletedBy = null;
+      existing.status = restoredStatus;
+      existing.orderStatus = restoredStatus;
+      existing.updatedAt = updatedAt;
+      _ordersCache[idx] = existing;
+    }
+
+    const { db, firebaseApp, isDemo } = svc();
+    if (!isDemo && firebaseApp) {
+      const fsUpdateObj = {
+        deleted: false,
+        deletedAt: null,
+        deletedBy: null,
+        status: restoredStatus,
+        orderStatus: restoredStatus,
+        updatedAt
+      };
+
+      const rtdbUpdateObj = {
+        deleted: false,
+        deletedAt: null,
+        deletedBy: null,
+        status: restoredStatus,
+        orderStatus: restoredStatus,
+        updatedAt
+      };
+
+      try {
+        await Promise.allSettled([
+          db ? (async () => {
+            const { doc, updateDoc, deleteDoc } = await fs();
+            await updateDoc(doc(db, 'orders', orderId), fsUpdateObj);
+            await deleteDoc(doc(db, 'deletedOrders', orderId)).catch(() => {});
+          })() : Promise.resolve(),
+          (async () => {
+            const { getDatabase, ref, update, remove } = await rtdb();
+            const db2 = getDatabase(firebaseApp);
+            await update(ref(db2, 'orders/' + orderId), rtdbUpdateObj);
+            await remove(ref(db2, 'deletedOrders/' + orderId)).catch(() => {});
+          })()
+        ]);
+      } catch (e) {
+        console.warn('Cloud restore order error:', e);
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('ordersUpdated', { detail: _ordersCache }));
+    return true;
+  },
+
+  async getActiveOrders(forceRefresh = false) {
+    const orders = await this.getOrders(forceRefresh);
+    return orders.filter(o => o.deleted !== true);
+  },
+
+  async getAllOrders(forceRefresh = false) {
+    return await this.getOrders(forceRefresh);
+  },
+
+  async getDeletedOrders(forceRefresh = false) {
+    const orders = await this.getOrders(forceRefresh);
+    return orders.filter(o => o.deleted === true);
   },
 
   // ══════════════════════════════════════════════════════════════════════

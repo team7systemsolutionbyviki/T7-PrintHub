@@ -26,6 +26,14 @@ service firebase.storage {
       allow delete: if true;
     }
 
+    // Payment proof path: payments/{orderId}/{fileName}
+    match /payments/{orderId}/{fileName} {
+      allow write: if request.resource.size < 15 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow read: if true;
+      allow delete: if true;
+    }
+
 
     // AWB slips uploaded by the existing admin application.
     // NOTE: the current project uses a local admin session rather than Firebase Auth,

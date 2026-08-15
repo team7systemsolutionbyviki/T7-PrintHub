@@ -312,17 +312,18 @@ export const AdminViews = {
   // --- ORDERS MANAGEMENT PIPELINE ---
   async renderOrders(queryStr = '') {
     // Load in parallel — both hit in-memory cache after first load
-    const [orders, settings] = await Promise.all([
+    const [allOrders, settings] = await Promise.all([
       DBService.getOrders(),
       DBService.getSettings()
     ]);
+    const orders = allOrders.filter(o => o.deleted !== true);
 
     const paramId = new URLSearchParams(queryStr).get('id') || '';
 
     // Check if viewing single printable invoice
     const paramInvoice = new URLSearchParams(queryStr).get('invoice');
     if (paramInvoice) {
-      const order = orders.find(o => o.id === paramInvoice);
+      const order = allOrders.find(o => o.id === paramInvoice);
       if (order) {
         document.getElementById('app-content').innerHTML = InvoiceComponent.renderHTML(order, settings);
         return;
@@ -334,7 +335,7 @@ export const AdminViews = {
         <div class="table-toolbar" style="flex-direction:column; align-items:stretch; gap:1rem;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
             <div>
-              <h3 style="margin:0;">Order Management Pipeline (<span id="pipeline-total-count">${orders.length}</span> orders)</h3>
+              <h3 style="margin:0;">Order Management Pipeline (<span id="pipeline-total-count">${orders.length}</span> active orders)</h3>
               <p class="text-muted" style="font-size:0.85rem; margin-top:0.25rem;">Live order processing queue & status workflow management</p>
             </div>
             
@@ -374,7 +375,7 @@ export const AdminViews = {
                 <th>Files (${orders.reduce((acc, o) => acc + (o.files?.length || 1), 0)} Total PDFs)</th>
                 <th style="background:rgba(59,130,246,0.1); color:var(--primary); font-weight:800; font-size:0.9rem;">📋 Specs & Copies</th>
                 <th>Amount</th>
-                <th>UTR Payment</th>
+                <th>Payment Proof</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -500,8 +501,33 @@ export const AdminViews = {
                   </td>
                   <td><b>${formatCurrency(o.pricing?.total)}</b></td>
                   <td>
-                    <code>${o.payment?.utr || 'N/A'}</code><br>
-                    <button class="btn btn-sm btn-outline" style="font-size:0.7rem; padding:0.2rem 0.5rem; margin-top:0.35rem;" onclick="window.viewOrderScreenshot('${o.id}')">🖼️ View Screenshot</button>
+                    ${(() => {
+                      const pay = o.payment || {};
+                      const payStatus = o.paymentStatus || pay.status || (o.status === 'Completed' || o.status === 'Payment Approved' ? 'Verified' : (o.status === 'Rejected' ? 'Rejected' : 'Waiting Verification'));
+                      const proofUrl = pay.screenshotUrl || pay.paymentScreenshotUrl || o.paymentScreenshotUrl || pay.screenshotDataUrl || pay.screenshot || o.screenshotUrl || '';
+                      const hasProof = !!(proofUrl && proofUrl.trim());
+
+                      let statusBadgeHTML = '';
+                      if (payStatus === 'Verified' || o.status === 'Payment Approved' || o.status === 'Completed') {
+                        statusBadgeHTML = `<span class="badge badge-approved" style="font-size:0.72rem;">🟢 Verified</span>`;
+                      } else if (payStatus === 'Rejected' || o.status === 'Rejected') {
+                        statusBadgeHTML = `<span class="badge badge-rejected" style="font-size:0.72rem;">🔴 Rejected</span>`;
+                      } else if (hasProof || payStatus === 'Proof Submitted' || pay.utr) {
+                        statusBadgeHTML = `<span class="badge badge-pending" style="font-size:0.72rem;">🟡 Proof Submitted</span>`;
+                      } else {
+                        statusBadgeHTML = `<span style="font-size:0.72rem; color:var(--text-muted); font-weight:600;">⚪ No Proof</span>`;
+                      }
+
+                      return `
+                        <div>
+                          <div style="margin-bottom:0.25rem;">${statusBadgeHTML}</div>
+                          <div style="font-size:0.75rem; color:var(--text-muted);">UTR: <code style="font-weight:700;">${pay.utr || 'N/A'}</code></div>
+                          ${hasProof
+                            ? `<button class="btn btn-sm btn-outline" style="font-size:0.7rem; padding:0.2rem 0.5rem; margin-top:0.35rem; display:inline-flex; align-items:center; gap:0.25rem;" onclick="window.viewOrderScreenshot('${o.id}')">🖼️ View Screenshot</button>`
+                            : `<span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-top:0.25rem;">No payment proof uploaded</span>`}
+                        </div>
+                      `;
+                    })()}
                   </td>
                   <td>
                     ${(() => {
@@ -587,15 +613,13 @@ export const AdminViews = {
     }, 6000);
 
     // Global Order Action Helpers
-    window.deleteOrderRecord = (orderId) => {
-      if (!confirm(`Delete order "${orderId}"? This cannot be undone.`)) return;
+    window.deleteOrderRecord = async (orderId) => {
+      if (!confirm(`Archive / Delete order "${orderId}"? The order will be removed from Active Orders, but retained in historical reports.`)) return;
 
-      // Guard: tell the polling timer this ID was deleted so it never re-adds it
       if (!window._deletedOrderIds) window._deletedOrderIds = new Set();
       window._deletedOrderIds.add(orderId);
       if (window._knownOrderIds) window._knownOrderIds.delete(orderId);
 
-      // Instant UI: animate row out
       const row = document.getElementById(`order-row-${orderId}`);
       if (row) {
         row.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
@@ -604,15 +628,32 @@ export const AdminViews = {
         setTimeout(() => { try { row.remove(); } catch(e){} }, 280);
       }
 
-      // Background: delete from localStorage + cloud
-      DBService.deleteOrder(orderId);
-      NotificationService.showToast(`🗑️ Order ${orderId} deleted!`, 'info');
+      await DBService.deleteOrder(orderId, 'Admin');
+      NotificationService.showToast(`🗑️ Order ${orderId} moved to archived / deleted orders.`, 'info');
 
-      // Update count badges
       ['pipeline-total-count', 'count-all'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = Math.max(0, parseInt(el.textContent || '0') - 1);
       });
+    };
+
+    window.restoreOrderRecord = async (orderId) => {
+      if (!confirm(`Restore order "${orderId}" back to Active Orders?`)) return;
+
+      if (window._deletedOrderIds) window._deletedOrderIds.delete(orderId);
+
+      try {
+        await DBService.restoreOrder(orderId);
+        NotificationService.showToast(`✅ Order ${orderId} restored to Active Orders!`, 'success');
+        if (window.location.hash.startsWith('#admin-reports')) {
+          await AdminViews.renderReports();
+        } else {
+          await AdminViews.renderOrders();
+        }
+      } catch (err) {
+        console.error('Failed to restore order:', err);
+        NotificationService.showToast('Failed to restore order: ' + (err.message || 'Error'), 'error');
+      }
     };
     window.downloadOrderFile = async (orderId, fileIndex) => {
       const order = await DBService.getOrderById(orderId);
@@ -771,6 +812,27 @@ export const AdminViews = {
       }
     };
 
+    window.updatePaymentProofStatus = async (orderId, newStatus) => {
+      let rejectionReason = '';
+      if (newStatus === 'Rejected') {
+        const inputReason = prompt('Enter rejection reason (optional):');
+        if (inputReason === null) return; // user cancelled
+        rejectionReason = inputReason.trim();
+      }
+
+      try {
+        await DBService.updatePaymentStatus(orderId, newStatus, rejectionReason);
+        if (window.ModalComponent?.close) window.ModalComponent.close();
+        else document.getElementById('active-modal-overlay')?.remove();
+
+        NotificationService.showToast(newStatus === 'Verified' ? '✅ Payment verified and approved!' : '❌ Payment rejected.', newStatus === 'Verified' ? 'success' : 'info');
+        await AdminViews.renderOrders();
+      } catch (err) {
+        console.error('[ADMIN] Update payment status error:', err);
+        NotificationService.showToast('Failed to update payment status: ' + (err.message || 'Error'), 'error');
+      }
+    };
+
     window.viewOrderScreenshot = async (orderId) => {
       const order = await DBService.getOrderById(orderId);
       if (!order) {
@@ -779,75 +841,105 @@ export const AdminViews = {
       }
 
       const pay = order.payment || {};
-      const possibleUrl = pay.screenshotUrl || pay.screenshotDataUrl || pay.screenshot || order.screenshotUrl || '';
-      const possibleDataUrl = pay.screenshotDataUrl || pay.fallbackData || (possibleUrl.startsWith('data:') ? possibleUrl : '');
-      const possibleIdbKey = pay.screenshotIdbKey || (possibleUrl.startsWith('idb://') ? possibleUrl.replace('idb://', '') : '');
+      const payStatus = order.paymentStatus || pay.status || (order.status === 'Completed' || order.status === 'Payment Approved' ? 'Verified' : (order.status === 'Rejected' ? 'Rejected' : 'Waiting Verification'));
+      const rawUrl = pay.screenshotUrl || pay.paymentScreenshotUrl || order.paymentScreenshotUrl || pay.screenshotDataUrl || pay.screenshot || order.screenshotUrl || '';
+      const rawDataUrl = pay.screenshotDataUrl || pay.fallbackData || (rawUrl.startsWith('data:') ? rawUrl : '');
+      const rawIdbKey = pay.screenshotIdbKey || (rawUrl.startsWith('idb://') ? rawUrl.replace('idb://', '') : '');
 
-      const hasRealScreenshot = (possibleUrl.startsWith('http://') || possibleUrl.startsWith('https://') || possibleUrl.startsWith('data:image') || possibleDataUrl.startsWith('data:image'));
-      
+      const hasRealScreenshot = !!(rawUrl.startsWith('http://') || rawUrl.startsWith('https://') || rawUrl.startsWith('data:image') || rawDataUrl.startsWith('data:image') || rawIdbKey);
+
       let screenshotUrl = '';
       if (hasRealScreenshot) {
-        screenshotUrl = await StorageService.getFileUrl({ 
-          url: possibleUrl, 
-          dataUrl: possibleDataUrl, 
-          idbKey: possibleIdbKey 
+        screenshotUrl = await StorageService.getFileUrl({
+          url: rawUrl,
+          dataUrl: rawDataUrl,
+          idbKey: rawIdbKey
         });
+        if (screenshotUrl && (screenshotUrl.startsWith('http://') || screenshotUrl.startsWith('https://'))) {
+          screenshotUrl += (screenshotUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+        }
       }
 
       let bodyHTML = '';
+      let statusBadgeHTML = '';
+      if (payStatus === 'Verified' || order.status === 'Payment Approved' || order.status === 'Completed') {
+        statusBadgeHTML = `<span class="badge badge-approved" style="font-size:0.85rem;">🟢 Verified</span>`;
+      } else if (payStatus === 'Rejected' || order.status === 'Rejected') {
+        statusBadgeHTML = `<span class="badge badge-rejected" style="font-size:0.85rem;">🔴 Rejected</span>`;
+      } else {
+        statusBadgeHTML = `<span class="badge badge-pending" style="font-size:0.85rem;">🟡 Proof Submitted</span>`;
+      }
 
       if (screenshotUrl && screenshotUrl.trim() !== '') {
         bodyHTML = `
-          <div style="text-align:center; padding:0.5rem;">
-            <div style="background:var(--bg-card); padding:0.75rem 1rem; border-radius:8px; border:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-              <div>UTR / Ref: <b style="color:var(--primary); font-family:monospace; font-size:1rem;">${pay.utr || 'N/A'}</b></div>
-              <div>Payer Name: <b>${pay.payerName || order.customerName}</b></div>
-            </div>
-            
-            <div style="position:relative; display:inline-block; max-width:100%;">
-              <img src="${screenshotUrl}" alt="Payment Screenshot" style="max-width:100%; max-height:65vh; border-radius:12px; border:1px solid var(--border-color); box-shadow:var(--shadow-md); display:inline-block; object-fit:contain;" 
-                onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'text-center text-muted\\' style=\\'padding:2rem;\\'>⚠️ Screenshot preview unavailable on this device.<br><a href=\\'${screenshotUrl}\\' target=\\'_blank\\' class=\\'btn btn-sm btn-primary mt-2\\'>Open Screenshot Link ↗</a></div>';" />
+          <div style="padding:0.5rem;">
+            <!-- Header Metadata Bar -->
+            <div style="background:var(--bg-card); padding:1rem; border-radius:12px; border:1px solid var(--border-color); margin-bottom:1rem;">
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.85rem; align-items:center;">
+                <div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Order ID &amp; Customer</div>
+                  <div style="font-size:1.05rem; font-weight:800;">${order.id}</div>
+                  <div style="font-size:0.88rem; font-weight:600; color:var(--text-main);">${order.customerName} (${order.customerPhone || 'N/A'})</div>
+                </div>
+                <div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Total Amount &amp; Status</div>
+                  <div style="font-size:1.25rem; font-weight:800; color:var(--primary);">${formatCurrency(order.pricing?.total || order.totalAmount)}</div>
+                  <div>${statusBadgeHTML}</div>
+                </div>
+                <div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">UPI UTR / Payer Name</div>
+                  <div style="font-size:0.95rem; font-weight:800; font-family:monospace; color:#059669;">${pay.utr || 'N/A'}</div>
+                  <div style="font-size:0.82rem; color:var(--text-muted);">${pay.payerName || order.customerName}</div>
+                </div>
+                <div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Uploaded Date / Time</div>
+                  <div style="font-size:0.85rem; font-weight:600;">${formatDate(order.createdAt)}</div>
+                </div>
+              </div>
+              ${order.rejectionReason ? `
+                <div style="margin-top:0.75rem; padding:0.5rem 0.75rem; background:rgba(239,68,68,0.1); border-radius:6px; border:1px solid rgba(239,68,68,0.3); font-size:0.82rem; color:#dc2626;">
+                  <b>Rejection Reason:</b> ${escapeHtml(order.rejectionReason)}
+                </div>
+              ` : ''}
             </div>
 
-            <div style="margin-top:1rem; display:flex; gap:0.75rem; justify-content:center;">
-              <a href="${screenshotUrl}" target="_blank" download="Payment_Receipt_${orderId}.png" class="btn btn-sm btn-primary">
-                📥 Download Screenshot
-              </a>
-              <a href="${screenshotUrl}" target="_blank" class="btn btn-sm btn-outline">
-                🔗 Open in New Tab ↗
-              </a>
+            <!-- Full Screenshot Viewer -->
+            <div style="text-align:center; background:#0f172a; padding:1.25rem; border-radius:14px; border:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; min-height:220px; overflow:hidden;">
+              <img src="${screenshotUrl}" alt="Payment Proof - ${order.id}" class="admin-payment-proof-modal-img"
+                style="max-width:900px; max-height:75vh; width:100%; object-fit:contain; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.5); display:inline-block;"
+                onerror="console.error('[STORAGE] Image load error:', this.src); this.onerror=null; this.parentElement.innerHTML='<div class=\\'text-center text-muted\\' style=\\'padding:3rem;\\'>⚠️ Screenshot preview failed to load from cloud.<br><a href=\\'${screenshotUrl}\\' target=\\'_blank\\' class=\\'btn btn-sm btn-primary mt-3\\'>Open Screenshot Link ↗</a></div>';" />
+              <style>
+                .admin-payment-proof-modal-img { max-width: 900px; max-height: 75vh; }
+                @media (max-width: 768px) {
+                  .admin-payment-proof-modal-img { max-width: 95vw !important; max-height: 75vh !important; }
+                }
+              </style>
+            </div>
+
+            <!-- Viewer Buttons -->
+            <div style="margin-top:1rem; display:flex; gap:0.75rem; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button class="btn btn-sm btn-success" onclick="window.updatePaymentProofStatus('${order.id}', 'Verified')">✅ Verify Payment</button>
+                <button class="btn btn-sm btn-danger" onclick="window.updatePaymentProofStatus('${order.id}', 'Rejected')">❌ Reject Payment</button>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <a href="${screenshotUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">🔍 Open Full Size ↗</a>
+                <a href="${screenshotUrl}" download="Payment_Proof_${order.id}.png" class="btn btn-sm btn-outline">📥 Download</a>
+              </div>
             </div>
           </div>
         `;
       } else {
         bodyHTML = `
-          <div style="background:linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color:white; padding:2rem; border-radius:16px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.15); padding-bottom:1rem; margin-bottom:1.5rem;">
-              <div>
-                <div style="color:#10b981; font-weight:700; font-size:0.85rem; text-transform:uppercase;">✓ UPI Payment Details Submitted</div>
-                <h3 style="font-size:1.4rem; margin-top:0.2rem;">${DBService.getSettingsSync().shopName || 'Print Shop'}</h3>
-              </div>
-              <div style="font-size:2.5rem;">📱</div>
-            </div>
-
-            <div style="margin-bottom:1.5rem;">
-              <div style="font-size:0.8rem; color:#94a3b8; text-transform:uppercase;">Total Amount Payable</div>
-              <div style="font-size:2.25rem; font-weight:800; color:#38bdf8;">${formatCurrency(order.pricing?.total)}</div>
-            </div>
-
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; background:rgba(255,255,255,0.05); padding:1rem; border-radius:12px; border:1px solid rgba(255,255,255,0.1);">
-              <div>
-                <div style="font-size:0.75rem; color:#94a3b8;">12-DIGIT UTR / REF NO.</div>
-                <div style="font-size:1.1rem; font-weight:700; font-family:monospace; color:#f1f5f9;">${pay.utr || 'N/A'}</div>
-              </div>
-              <div>
-                <div style="font-size:0.75rem; color:#94a3b8;">PAYER NAME</div>
-                <div style="font-size:1.05rem; font-weight:700; color:#f1f5f9;">${pay.payerName || order.customerName}</div>
-              </div>
-            </div>
-
-            <div style="margin-top:1.25rem; font-size:0.82rem; color:#94a3b8; text-align:center; background:rgba(255,255,255,0.04); padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.08);">
-              ℹ️ Customer submitted payment with UTR Ref <b>${pay.utr || 'N/A'}</b> & Payer Name <b>${pay.payerName || order.customerName}</b> without attaching an optional screenshot image.
+          <div style="padding:1.5rem; background:var(--bg-card); border-radius:14px; border:1px solid var(--border-color); text-align:center;">
+            <div style="font-size:3rem; margin-bottom:0.5rem;">⚪</div>
+            <h3 style="margin:0 0 0.5rem; font-size:1.3rem;">No payment proof uploaded</h3>
+            <p class="text-muted" style="max-width:500px; margin:0 auto 1.25rem; font-size:0.92rem; line-height:1.6;">
+              Customer submitted UPI UTR Reference <b>${pay.utr || 'N/A'}</b> & Payer Name <b>${pay.payerName || order.customerName}</b> for order <b>${order.id}</b> without attaching a payment screenshot.
+            </p>
+            <div style="display:inline-flex; gap:0.75rem; justify-content:center;">
+              <button class="btn btn-sm btn-success" onclick="window.updatePaymentProofStatus('${order.id}', 'Verified')">✅ Verify Payment (UTR ${pay.utr || ''})</button>
+              <button class="btn btn-sm btn-danger" onclick="window.updatePaymentProofStatus('${order.id}', 'Rejected')">❌ Reject Order</button>
             </div>
           </div>
         `;
@@ -856,13 +948,11 @@ export const AdminViews = {
       const modal = ModalComponent || window.ModalComponent;
       if (modal) {
         modal.show({
-          title: `Payment Receipt Inspection - ${order.id}`,
+          title: `🖼️ Payment Proof Inspection — ${order.id}`,
           bodyHTML: bodyHTML,
           footerHTML: `<button class="btn btn-secondary" onclick="if(window.ModalComponent) window.ModalComponent.close(); else document.getElementById('active-modal-overlay')?.remove();">Close</button>`,
-          width: '650px'
+          width: '940px'
         });
-      } else {
-        NotificationService.showToast(`UTR: ${pay.utr} | Payer: ${pay.payerName}`, 'info');
       }
     };
 
@@ -2078,7 +2168,7 @@ Thank you for choosing ${settings.shopName}!
   },
 
   async renderReports(queryStr = '') {
-    const orders = await DBService.getOrders();
+    const orders = await DBService.getAllOrders();
     if (new URLSearchParams(queryStr || '').get('view') === 'bookings') return this.renderBookingReport();
 
     const html = `
@@ -2086,7 +2176,7 @@ Thank you for choosing ${settings.shopName}!
         <div class="table-toolbar" style="flex-wrap:wrap; gap:1rem;">
           <div>
             <h3>📊 Full Executive Business Performance & Financial Reports</h3>
-            <p class="text-muted" style="font-size:0.85rem;">Filter sales records, analyze paper volume, track delivery revenues, and export full transaction ledgers.</p>
+            <p class="text-muted" style="font-size:0.85rem;">Filter sales records, analyze paper volume, track delivery revenues, and inspect active vs archived orders.</p>
           </div>
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
             <button class="btn btn-sm btn-outline" id="btn-print-report-summary">🖨️ Print Summary Report</button>
@@ -2114,17 +2204,27 @@ Thank you for choosing ${settings.shopName}!
           </div>
 
           <div style="display:flex; align-items:center; gap:0.5rem;">
-            <span style="font-weight:700; font-size:0.85rem; color:var(--text-muted);">Status Filter:</span>
-            <select class="form-select form-select-sm" id="report-status-filter" style="width:170px;">
+            <span style="font-weight:700; font-size:0.85rem; color:var(--text-muted);">Report View:</span>
+            <select class="form-select form-select-sm" id="report-archive-filter" style="width:160px;">
               <option value="all" selected>All Orders</option>
-              <option value="valid">Valid Net Orders (Non-Rejected)</option>
+              <option value="active">Active Orders</option>
+              <option value="deleted">Deleted Orders</option>
+            </select>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <span style="font-weight:700; font-size:0.85rem; color:var(--text-muted);">Status Filter:</span>
+            <select class="form-select form-select-sm" id="report-status-filter" style="width:180px;">
+              <option value="all" selected>All Statuses</option>
+              <option value="valid">Valid Net Orders (Active)</option>
               <option value="Completed">Completed Only</option>
-              <option value="Rejected">Rejected / Deducted Only</option>
+              <option value="Rejected">Rejected Only</option>
+              <option value="Deleted">Deleted / Archived Only</option>
             </select>
           </div>
 
           <div style="display:flex; align-items:center; gap:0.5rem; margin-left:auto;">
-            <input type="text" class="form-control form-control-sm" id="report-search-ledger" placeholder="Search Order ID, Customer, UTR..." style="width:200px;">
+            <input type="text" class="form-control form-control-sm" id="report-search-ledger" placeholder="Search ID, Customer, UTR..." style="width:200px;">
           </div>
         </div>
 
@@ -2147,7 +2247,7 @@ Thank you for choosing ${settings.shopName}!
                 <th>Delivery Fee</th>
                 <th>Total Paid</th>
                 <th>UTR Payment</th>
-                <th>Status</th>
+                <th>Status / Action</th>
               </tr>
             </thead>
             <tbody id="report-ledger-body">
@@ -2165,6 +2265,7 @@ Thank you for choosing ${settings.shopName}!
 
     // Dynamic Filter Engine
     const periodSelect = document.getElementById('report-period-filter');
+    const archiveSelect = document.getElementById('report-archive-filter');
     const customContainer = document.getElementById('custom-date-container');
     const dateFromInput = document.getElementById('report-date-from');
     const dateToInput = document.getElementById('report-date-to');
@@ -2176,13 +2277,14 @@ Thank you for choosing ${settings.shopName}!
       applyReportFilters();
     };
 
-    [dateFromInput, dateToInput, statusSelect, searchLedgerInput].forEach(el => {
+    [archiveSelect, dateFromInput, dateToInput, statusSelect, searchLedgerInput].forEach(el => {
       el?.addEventListener('input', applyReportFilters);
       el?.addEventListener('change', applyReportFilters);
     });
 
     function applyReportFilters() {
       const period = periodSelect.value;
+      const archiveF = archiveSelect.value;
       const statusF = statusSelect.value;
       const searchQ = (searchLedgerInput.value || '').toLowerCase().trim();
 
@@ -2190,6 +2292,10 @@ Thank you for choosing ${settings.shopName}!
       const todayStr = new Date().toISOString().slice(0, 10);
 
       const filtered = orders.filter(o => {
+        // Archive / Deletion filter
+        if (archiveF === 'active' && o.deleted === true) return false;
+        if (archiveF === 'deleted' && o.deleted !== true) return false;
+
         const oDate = new Date(o.createdAt || Date.now());
         const oDateStr = oDate.toISOString().slice(0, 10);
 
@@ -2211,7 +2317,9 @@ Thank you for choosing ${settings.shopName}!
 
         // Status filter
         if (statusF === 'valid') {
-          if (o.status === 'Rejected') return false;
+          if (o.status === 'Rejected' || o.deleted === true) return false;
+        } else if (statusF === 'Deleted') {
+          if (o.deleted !== true) return false;
         } else if (statusF !== 'all') {
           if (o.status !== statusF) return false;
         }
@@ -2223,7 +2331,8 @@ Thank you for choosing ${settings.shopName}!
           const phoneStr = (o.customerPhone || '').toLowerCase();
           const utrStr = (o.payment?.utr || '').toLowerCase();
           const areaStr = (o.pricing?.deliveryZone || '').toLowerCase();
-          if (!idStr.includes(searchQ) && !nameStr.includes(searchQ) && !phoneStr.includes(searchQ) && !utrStr.includes(searchQ) && !areaStr.includes(searchQ)) {
+          const delUser = (o.deletedBy || '').toLowerCase();
+          if (!idStr.includes(searchQ) && !nameStr.includes(searchQ) && !phoneStr.includes(searchQ) && !utrStr.includes(searchQ) && !areaStr.includes(searchQ) && !delUser.includes(searchQ)) {
             return false;
           }
         }
@@ -2232,16 +2341,18 @@ Thank you for choosing ${settings.shopName}!
       });
 
       // Recalculate Financial Metrics
-      const validOrders = filtered.filter(o => o.status !== 'Rejected');
-      const rejectedOrders = filtered.filter(o => o.status === 'Rejected');
+      const validActiveOrders = filtered.filter(o => o.deleted !== true && o.status !== 'Rejected');
+      const rejectedOrders = filtered.filter(o => o.deleted !== true && o.status === 'Rejected');
+      const deletedOrders = filtered.filter(o => o.deleted === true);
 
-      const netRevenue = validOrders.reduce((acc, o) => acc + (o.pricing?.total || 0), 0);
-      const totalDeliveryFees = validOrders.reduce((acc, o) => acc + (o.pricing?.deliveryFee || 0), 0);
+      const netRevenue = validActiveOrders.reduce((acc, o) => acc + (o.pricing?.total || 0), 0);
+      const totalDeliveryFees = validActiveOrders.reduce((acc, o) => acc + (o.pricing?.deliveryFee || 0), 0);
       const rejectedAmount = rejectedOrders.reduce((acc, o) => acc + (o.pricing?.total || 0), 0);
-      const avgOrderValue = validOrders.length ? netRevenue / validOrders.length : 0;
+      const deletedAmount = deletedOrders.reduce((acc, o) => acc + (o.pricing?.total || 0), 0);
+      const avgOrderValue = validActiveOrders.length ? netRevenue / validActiveOrders.length : 0;
 
       let totalPagesPrinted = 0;
-      validOrders.forEach(o => {
+      validActiveOrders.forEach(o => {
         const filesList = (o.files && o.files.length > 0) ? o.files : (o.file ? [o.file] : []);
         filesList.forEach(f => {
           const copies = (f.options || o.options)?.copies || 1;
@@ -2256,13 +2367,19 @@ Thank you for choosing ${settings.shopName}!
         <div class="glass-panel" style="padding:1.25rem;">
           <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Net Sales Revenue</h4>
           <div style="font-size:1.75rem; font-weight:800; color:var(--primary); margin-top:0.35rem;">${formatCurrency(netRevenue)}</div>
-          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">(Excludes rejected orders)</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">(Active valid non-rejected orders)</div>
         </div>
 
         <div class="glass-panel" style="padding:1.25rem;">
-          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Valid Orders Count</h4>
-          <div style="font-size:1.75rem; font-weight:800; color:var(--accent); margin-top:0.35rem;">${validOrders.length} Orders</div>
+          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Active Orders Count</h4>
+          <div style="font-size:1.75rem; font-weight:800; color:var(--accent); margin-top:0.35rem;">${validActiveOrders.length} Active</div>
           <div style="font-size:0.75rem; color:#ef4444; margin-top:0.2rem;">${rejectedOrders.length} rejected</div>
+        </div>
+
+        <div class="glass-panel" style="padding:1.25rem;">
+          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Archived / Deleted Orders</h4>
+          <div style="font-size:1.75rem; font-weight:800; color:#dc2626; margin-top:0.35rem;">${deletedOrders.length} Orders</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">${formatCurrency(deletedAmount)} historical record</div>
         </div>
 
         <div class="glass-panel" style="padding:1.25rem;">
@@ -2272,21 +2389,15 @@ Thank you for choosing ${settings.shopName}!
         </div>
 
         <div class="glass-panel" style="padding:1.25rem;">
-          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Avg Valid Order Value</h4>
+          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Avg Active Order Value</h4>
           <div style="font-size:1.75rem; font-weight:800; color:var(--success); margin-top:0.35rem;">${formatCurrency(avgOrderValue)}</div>
-          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">Per customer order</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">Per active customer order</div>
         </div>
 
         <div class="glass-panel" style="padding:1.25rem;">
           <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Total Pages Printed</h4>
           <div style="font-size:1.75rem; font-weight:800; color:#7c3aed; margin-top:0.35rem;">${totalPagesPrinted} Pages</div>
           <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">Paper volume printed</div>
-        </div>
-
-        <div class="glass-panel" style="padding:1.25rem;">
-          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Rejected / Deducted</h4>
-          <div style="font-size:1.75rem; font-weight:800; color:#ef4444; margin-top:0.35rem;">-${formatCurrency(rejectedAmount)}</div>
-          <div style="font-size:0.75rem; color:#ef4444; margin-top:0.2rem;">${rejectedOrders.length} order(s) deducted</div>
         </div>
       `;
 
@@ -2304,11 +2415,24 @@ Thank you for choosing ${settings.shopName}!
         tbody.innerHTML = filtered.map(o => {
           const filesList = (o.files && o.files.length > 0) ? o.files : (o.file ? [o.file] : []);
           const totalPgs = filesList.reduce((acc, f) => acc + (f.pages || 1) * ((f.options || o.options)?.copies || 1), 0);
+          const isDel = o.deleted === true;
+
+          let statusDisplay = getStatusBadgeHTML(o.status);
+          if (isDel) {
+            statusDisplay = `<span class="badge badge-rejected" style="background:rgba(239,68,68,0.15); color:#dc2626; border:1px solid rgba(239,68,68,0.3); font-weight:800; font-size:0.75rem;">🔴 Deleted</span>`;
+          }
 
           return `
-            <tr>
-              <td style="font-size:0.8rem;">${formatDate(o.createdAt)}<br><span style="color:var(--text-muted);">${formatTime(o.createdAt)}</span></td>
-              <td><b>${o.id}</b></td>
+            <tr style="${isDel ? 'background:rgba(239,68,68,0.05);' : ''}">
+              <td style="font-size:0.8rem;">
+                ${formatDate(o.createdAt)}<br>
+                <span style="color:var(--text-muted);">${formatTime(o.createdAt)}</span>
+                ${isDel ? `<div style="font-size:0.72rem; color:#dc2626; margin-top:0.25rem; font-weight:600;">🗑️ Deleted ${formatDate(o.deletedAt)} by ${o.deletedBy || 'Admin'}</div>` : ''}
+              </td>
+              <td>
+                <b>${o.id}</b>
+                ${isDel ? `<br><button class="btn btn-sm btn-link" style="font-size:0.72rem; padding:0; color:var(--primary); text-decoration:underline;" onclick="window.restoreOrderRecord('${o.id}')">🔄 Restore Order</button>` : ''}
+              </td>
               <td>
                 <b>${o.customerName || 'Customer'}</b><br>
                 <span style="font-size:0.75rem; color:var(--text-muted);">${o.customerPhone || 'N/A'}</span>
@@ -2320,9 +2444,15 @@ Thank you for choosing ${settings.shopName}!
                 <b>${filesList.length} file(s)</b> • ${totalPgs} pgs
               </td>
               <td>${formatCurrency(o.pricing?.deliveryFee || 0)}</td>
-              <td><b style="color:${o.status === 'Rejected' ? '#ef4444' : 'var(--primary)'};">${formatCurrency(o.pricing?.total)}</b></td>
-              <td><code>${o.payment?.utr || 'N/A'}</code></td>
-              <td>${getStatusBadgeHTML(o.status)}</td>
+              <td><b style="color:${isDel ? '#dc2626' : (o.status === 'Rejected' ? '#ef4444' : 'var(--primary)')};">${formatCurrency(o.pricing?.total)}</b></td>
+              <td>
+                <code>${o.payment?.utr || 'N/A'}</code>
+                ${(o.paymentScreenshotUrl || o.payment?.screenshotUrl) ? `<br><button class="btn btn-sm btn-link" style="font-size:0.7rem; padding:0;" onclick="window.viewOrderScreenshot('${o.id}')">🖼️ View Proof</button>` : ''}
+              </td>
+              <td>
+                ${statusDisplay}
+                ${isDel ? `<br><button class="btn btn-sm btn-success" style="font-size:0.7rem; padding:0.15rem 0.45rem; margin-top:0.35rem;" onclick="window.restoreOrderRecord('${o.id}')">🔄 Restore</button>` : ''}
+              </td>
             </tr>
           `;
         }).join('');
@@ -2333,9 +2463,9 @@ Thank you for choosing ${settings.shopName}!
       tfoot.innerHTML = `
         <tr>
           <td colspan="5">Summary Total (${filtered.length} Filtered Transactions)</td>
-          <td><b>${formatCurrency(filtered.reduce((sum, o) => sum + (o.status !== 'Rejected' ? (o.pricing?.deliveryFee || 0) : 0), 0))}</b></td>
+          <td><b>${formatCurrency(filtered.reduce((sum, o) => sum + ((o.deleted !== true && o.status !== 'Rejected') ? (o.pricing?.deliveryFee || 0) : 0), 0))}</b></td>
           <td style="color:var(--primary); font-size:1.05rem;"><b>${formatCurrency(netRevenue)}</b></td>
-          <td colspan="2">Net Gain (Excludes Rejected)</td>
+          <td colspan="2">Net Active Revenue (Excludes Deleted &amp; Rejected)</td>
         </tr>
       `;
     }
@@ -2361,7 +2491,10 @@ Thank you for choosing ${settings.shopName}!
           DeliveryFee: o.pricing?.deliveryFee || 0,
           TotalAmount: o.pricing?.total || 0,
           PaymentUTR: o.payment?.utr || 'N/A',
-          OrderStatus: o.status
+          OrderStatus: o.status,
+          IsDeleted: o.deleted ? 'Yes' : 'No',
+          DeletedAt: o.deletedAt || '',
+          DeletedBy: o.deletedBy || ''
         };
       });
       exportToCSV('Team7_Full_Sales_Ledger.csv', exportRows);
