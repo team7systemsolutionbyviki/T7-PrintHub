@@ -1351,6 +1351,7 @@ Thank you for choosing ${settings.shopName}!
   async renderPricing() {
     // Load pricing from Firebase, update PricingEngine in-memory cache
     const pricing = await DBService.getPricing();
+    const settings = await DBService.getSettings();
     await PricingEngine.preload(DBService);
 
     const html = `
@@ -1486,6 +1487,64 @@ Thank you for choosing ${settings.shopName}!
             </div>
           </div>
 
+          <!-- 5. Weight-Based Home Delivery Pricing -->
+          <div class="glass-panel" style="padding:1.25rem; border-radius:12px; grid-column:span 2; border:1.5px solid rgba(37,99,235,.25);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;border-bottom:1px solid var(--border-color);padding-bottom:.75rem;gap:1rem;flex-wrap:wrap;">
+              <div>
+                <h4 style="margin:0;font-size:1.05rem;color:var(--primary);">🚚 Home Delivery — KG Pricing</h4>
+                <p class="text-muted" style="font-size:.78rem;margin:.25rem 0 0;">
+                  Customer delivery charge is calculated from total package weight. Store Pickup is always free.
+                </p>
+              </div>
+              <span class="badge badge-approved" style="font-size:.72rem;">WEIGHT BASED</span>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;">
+              <div class="form-group">
+                <label class="form-label">Base Weight (KG)</label>
+                <input type="number" step="0.01" min="0.01" class="form-control" id="pricing-courier-base-kg"
+                  value="${Number(settings.courierPricing?.baseWeightKg ?? 1)}">
+                <small class="text-muted">Included in base price</small>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Base Price (₹)</label>
+                <input type="number" step="0.01" min="0" class="form-control" id="pricing-courier-base-cost"
+                  value="${Number(settings.courierPricing?.baseCost ?? 60)}">
+                <small class="text-muted">Example: 1 KG = ₹60</small>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Additional Slab (KG)</label>
+                <input type="number" step="0.01" min="0.01" class="form-control" id="pricing-courier-add-kg"
+                  value="${Number(settings.courierPricing?.additionalWeightKg ?? 0.5)}">
+                <small class="text-muted">Example: 0.5 KG</small>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Additional Slab Price (₹)</label>
+                <input type="number" step="0.01" min="0" class="form-control" id="pricing-courier-add-cost"
+                  value="${Number(settings.courierPricing?.additionalCost ?? 40)}">
+                <small class="text-muted">Example: +₹40 per slab</small>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem;">
+              <div class="form-group">
+                <label class="form-label">Default Packing Weight (g)</label>
+                <input type="number" step="1" min="0" class="form-control" id="pricing-courier-pack-g"
+                  value="${Number(settings.courierPricing?.packagingWeightGrams ?? 50)}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Binding Weight per Set (g)</label>
+                <input type="number" step="1" min="0" class="form-control" id="pricing-courier-bind-g"
+                  value="${Number(settings.courierPricing?.bindingWeightGrams ?? 30)}">
+              </div>
+            </div>
+
+            <div style="margin-top:.75rem;padding:.75rem 1rem;background:var(--bg-body);border-radius:9px;border:1px solid var(--border-color);font-size:.8rem;">
+              <b>Example:</b> 0–1 KG = ₹60 &nbsp;•&nbsp; 1.001–1.5 KG = ₹100 &nbsp;•&nbsp; 1.501–2 KG = ₹140.
+              The customer-facing delivery fee uses these settings for <b>Home Delivery</b> only.
+            </div>
+          </div>
+
           <!-- 5. Area-Wise Delivery Charges & Zones (CRUD) -->
           <div style="grid-column: span 2; border-top:1px solid var(--border-color); padding-top:1.5rem; margin-top:0.5rem;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; border-bottom:1px solid var(--border-color); padding-bottom:0.85rem; flex-wrap:wrap; gap:1rem;">
@@ -1582,8 +1641,28 @@ Thank you for choosing ${settings.shopName}!
         }
       });
 
-      PricingEngine.savePricingData(pricing, DBService);
-      NotificationService.showToast('All pricing structure & delivery fees saved successfully!', 'success');
+      const courierPricing = {
+        ...(settings.courierPricing || {}),
+        baseWeightKg: Math.max(0.01, Number(document.getElementById('pricing-courier-base-kg')?.value) || 1),
+        baseCost: Math.max(0, Number(document.getElementById('pricing-courier-base-cost')?.value) || 60),
+        additionalWeightKg: Math.max(0.01, Number(document.getElementById('pricing-courier-add-kg')?.value) || 0.5),
+        additionalCost: Math.max(0, Number(document.getElementById('pricing-courier-add-cost')?.value) || 40),
+        packagingWeightGrams: Math.max(0, Number(document.getElementById('pricing-courier-pack-g')?.value) || 0),
+        bindingWeightGrams: Math.max(0, Number(document.getElementById('pricing-courier-bind-g')?.value) || 0),
+        freeDelivery: false
+      };
+
+      const updatedSettings = { ...settings, courierPricing };
+      Promise.all([
+        PricingEngine.savePricingData(pricing, DBService),
+        DBService.saveSettings(updatedSettings)
+      ]).then(() => {
+        if (window.refreshShopSettingsUI) window.refreshShopSettingsUI(updatedSettings);
+        NotificationService.showToast('All pricing + KG delivery settings saved successfully!', 'success');
+      }).catch((err) => {
+        console.error('[PRICING] Save failed:', err);
+        NotificationService.showToast('Failed to save pricing settings.', 'error');
+      });
     };
 
     // Paper Size Add Modal & Handler
@@ -2302,8 +2381,8 @@ Thank you for choosing ${settings.shopName}!
           </div>
 
           <div style="margin-top:1.5rem;padding:1.25rem;border:1px solid var(--border-color);border-radius:14px;background:var(--bg-body);">
-            <h3 style="margin:0 0 .35rem;">🚚 Courier Pricing & Free Delivery</h3>
-            <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem;">Internal courier cost. Customers see FREE DELIVERY.</p>
+            <h3 style="margin:0 0 .35rem;">🚚 Home Delivery KG Pricing</h3>
+            <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem;">Set the weight-based customer delivery charge. Store Pickup is always free.</p>
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;">
               <div class="form-group"><label class="form-label">Courier</label><input class="form-control" id="st-courier-name" value="${settings.courierPricing?.courierName || 'ST Courier'}"></div>
               <div class="form-group"><label class="form-label">Base Weight (KG)</label><input type="number" step="0.01" min="0.01" class="form-control" id="st-courier-base-kg" value="${Number(settings.courierPricing?.baseWeightKg ?? 1)}"></div>
@@ -2312,7 +2391,7 @@ Thank you for choosing ${settings.shopName}!
               <div class="form-group"><label class="form-label">Additional Slab Cost (₹)</label><input type="number" step="0.01" min="0" class="form-control" id="st-courier-add-cost" value="${Number(settings.courierPricing?.additionalCost ?? 40)}"></div>
               <div class="form-group"><label class="form-label">Default Packing Weight (g)</label><input type="number" step="1" min="0" class="form-control" id="st-courier-pack-g" value="${Number(settings.courierPricing?.packagingWeightGrams ?? 50)}"></div>
               <div class="form-group"><label class="form-label">Binding Weight (g)</label><input type="number" step="1" min="0" class="form-control" id="st-courier-bind-g" value="${Number(settings.courierPricing?.bindingWeightGrams ?? 30)}"></div>
-              <label style="display:flex;align-items:center;gap:.5rem;font-weight:700;padding-top:1.8rem;"><input type="checkbox" id="st-free-delivery" ${settings.courierPricing?.freeDelivery !== false ? 'checked' : ''}> FREE DELIVERY to customer</label>
+              <div style="padding-top:1.8rem;font-weight:700;color:#059669;">✓ Weight-based delivery charges enabled</div>
             </div>
           </div>
         </div>
@@ -2346,7 +2425,7 @@ Thank you for choosing ${settings.shopName}!
           additionalCost: Number(document.getElementById('st-courier-add-cost').value) || 40,
           packagingWeightGrams: Number(document.getElementById('st-courier-pack-g').value) || 0,
           bindingWeightGrams: Number(document.getElementById('st-courier-bind-g').value) || 0,
-          freeDelivery: document.getElementById('st-free-delivery').checked
+          freeDelivery: false
         },
       };
 

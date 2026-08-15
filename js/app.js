@@ -86,7 +86,7 @@ window.refreshShopSettingsUI = (settings) => {
 
   // 5. Re-render active public route if currently visible to capture component template updates
   const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
-  const publicRoutes = ['home', 'services', 'pricing', 'how-it-works', 'faq', 'order', 'service-request', 'track', 'contact', ''];
+  const publicRoutes = ['home', 'services', 'pricing', 'how-it-works', 'faq', 'order', 'service-request', 'track', 'contact', 'privacy', 'terms', ''];
   if (publicRoutes.includes(currentHash)) {
     Router.handleRoute();
   }
@@ -142,6 +142,36 @@ const initApp = async () => {
     Router.register('service-request', (q) => { NavbarComponent.render(); PublicViews.renderServiceRequest(q); window.updateFloatingButtons(); });
     Router.register('track',   (q) => { NavbarComponent.render(); PublicViews.renderTrackOrder(q);  window.updateFloatingButtons(); });
     Router.register('contact', (q) => { NavbarComponent.render(); PublicViews.renderContact(q);     window.updateFloatingButtons(); });
+    Router.register('privacy', (q) => {
+      NavbarComponent.render();
+      const app = document.getElementById('app-content');
+      app.innerHTML = `
+        <section style="padding:4rem 0;">
+          <div class="container" style="max-width:900px;">
+            <div class="glass-panel" style="padding:2rem;">
+              <h1 style="margin-bottom:1rem;">Privacy Policy</h1>
+              <p class="text-muted">We use the information you provide to process print orders, payments, delivery, support requests, and order tracking. Uploaded documents are stored only as required for order processing and service delivery.</p>
+              <p class="text-muted" style="margin-top:1rem;">For privacy questions or deletion requests, contact the shop using the contact details shown on the Contact page.</p>
+            </div>
+          </div>
+        </section>`;
+      window.updateFloatingButtons();
+    });
+    Router.register('terms', (q) => {
+      NavbarComponent.render();
+      const app = document.getElementById('app-content');
+      app.innerHTML = `
+        <section style="padding:4rem 0;">
+          <div class="container" style="max-width:900px;">
+            <div class="glass-panel" style="padding:2rem;">
+              <h1 style="margin-bottom:1rem;">Terms &amp; Conditions</h1>
+              <p class="text-muted">Orders are processed according to the print specifications selected by the customer. Customers are responsible for reviewing files, page ranges, quantities, and contact details before submission.</p>
+              <p class="text-muted" style="margin-top:1rem;">Printing, delivery, cancellation, and refund decisions are subject to the shop's applicable policies and the order status.</p>
+            </div>
+          </div>
+        </section>`;
+      window.updateFloatingButtons();
+    });
 
     // Admin Routes
     Router.register('admin-login',        (q) => { NavbarComponent.render(); AdminViews.renderLogin(q); });

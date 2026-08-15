@@ -575,17 +575,16 @@ export const PublicViews = {
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">${I18nService.t('delivery_zone_label')}</label>
+                  <label class="form-label">Delivery Method *</label>
                   <select class="form-select" id="cust-delivery-zone" style="font-weight:600; color:var(--primary);">
-                    ${Object.entries(pricing.deliveryZones || {}).map(([key, item]) => `
-                      <option value="${key}">${item.label}</option>
-                    `).join('')}
+                    <option value="Pickup">Store Pickup — Free</option>
+                    <option value="HomeDelivery">Home Delivery</option>
                   </select>
                 </div>
 
-                <div class="form-group">
-                  <label class="form-label">${I18nService.t('delivery_address_label')}</label>
-                  <textarea class="form-control" id="cust-address" placeholder="Enter full address if requesting doorstep delivery"></textarea>
+                <div class="form-group" id="delivery-address-group" style="display:none;">
+                  <label class="form-label">Delivery Address *</label>
+                  <textarea class="form-control" id="cust-address" placeholder="Enter your complete home delivery address"></textarea>
                 </div>
 
                 <div id="order-products-section" style="margin-top:1.25rem; padding:1.25rem; background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px;">
@@ -698,9 +697,9 @@ export const PublicViews = {
                 <span>${I18nService.t('summary_lamination')}</span>
                 <span id="price-lamination">₹0.00</span>
               </div>
-              <div class="price-row" id="row-delivery" style="display:none;">
-                <span>${I18nService.t('summary_delivery')}</span>
-                <span id="price-delivery">₹0.00</span>
+              <div class="price-row" id="row-delivery">
+                <span>🚚 ${I18nService.t('summary_delivery')}</span>
+                <span id="price-delivery" style="color:#059669;font-weight:800;">FREE</span>
               </div>
               <div class="price-row" id="row-products" style="display:none;">
                 <span>🛍️ Products / Accessories</span>
@@ -709,10 +708,6 @@ export const PublicViews = {
               <div class="price-row">
                 <span>📦 Package Weight</span>
                 <span id="package-weight-display">—</span>
-              </div>
-              <div class="price-row">
-                <span>🚚 Delivery</span>
-                <span style="color:#059669;font-weight:800;">FREE</span>
               </div>
 
               <div id="summary-products-list" style="display:none; margin:0.25rem 0 0.75rem; font-size:0.78rem; color:var(--text-muted);"></div>
@@ -820,7 +815,10 @@ export const PublicViews = {
       state.files.forEach(f => {
         const opts = f.options || {};
         const pages = Math.max(1, Number(f.pages || f.pageCount || 1) || 1);
-        const copies = Math.max(1, parseInt(opts.copies, 10) || 1);
+        const isMixedCopies = opts.colorMode === 'Color + B&W Copies';
+        const copies = isMixedCopies
+          ? (Math.max(1, parseInt(opts.colorCopies, 10) || 1) + Math.max(1, parseInt(opts.bwCopies, 10) || 1))
+          : Math.max(1, parseInt(opts.copies, 10) || 1);
         const paperSize = opts.paperSize || 'A4';
         const gsm = getNumericGsm(opts.paperQuality || '70 GSM');
         const area = paperAreaM2[paperSize] || paperAreaM2.A4;
@@ -832,7 +830,10 @@ export const PublicViews = {
         printWeightGrams += physicalSheetsPerCopy * copies * area * gsm;
 
         if (opts.binding && opts.binding !== 'None') {
-          bindingWeightGrams += Number(settings.courierPricing?.bindingWeightGrams ?? 30) || 0;
+          const bindingSets = isMixedCopies
+            ? (Math.max(1, parseInt(opts.colorCopies, 10) || 1) + Math.max(1, parseInt(opts.bwCopies, 10) || 1))
+            : copies;
+          bindingWeightGrams += (Number(settings.courierPricing?.bindingWeightGrams ?? 30) || 0) * bindingSets;
         }
       });
 
@@ -869,6 +870,7 @@ export const PublicViews = {
       let totalPaper = 0, totalColor = 0, totalBinding = 0, totalLamination = 0;
       let rawBwPages = 0, rawColorPages = 0;
       let totalBwPrints = 0, totalColorPrints = 0;
+      let totalColorCopies = 0, totalBwCopies = 0;
       let colorPaperRate = 6.00, basePaperRate = 1.50;
 
       state.files.forEach(f => {
@@ -881,8 +883,10 @@ export const PublicViews = {
         rawBwPages += (q.bwPagesCount || 0);
         rawColorPages += (q.colorPagesCount || 0);
 
-        totalBwPrints += (q.bwPagesCount || 0) * (q.copies || 1);
-        totalColorPrints += (q.colorPagesCount || 0) * (q.copies || 1);
+        totalBwPrints += q.totalBWPrints || ((q.bwPagesCount || 0) * (q.bwCopies || q.copies || 1));
+        totalColorPrints += q.totalColorPrints || ((q.colorPagesCount || 0) * (q.colorCopies || q.copies || 1));
+        totalColorCopies += q.colorCopies || 0;
+        totalBwCopies += q.bwCopies || 0;
 
         if (q.colorPaperRate) colorPaperRate = q.colorPaperRate;
         if (q.basePaperRate) basePaperRate = q.basePaperRate;
@@ -891,10 +895,13 @@ export const PublicViews = {
       const courierWeight = calculatePackageWeight();
       const products = getSelectedProducts();
 
-      // Customer delivery is FREE. Courier cost is an INTERNAL business cost.
-      // Pickup has no courier cost.
-      const deliveryFee = 0;
-      const internalCourierCost = selectedZoneKey === 'Pickup' ? 0 : courierWeight.courierCost;
+      // Delivery fee is weight-based for every doorstep-delivery zone.
+      // Pickup remains free. The selected zone controls the delivery area,
+      // while courierPricing controls the actual weight charge:
+      // first 1 kg = ₹60, every additional 500 g = ₹40.
+      const isPickup = selectedZoneKey === 'Pickup';
+      const deliveryFee = isPickup ? 0 : courierWeight.courierCost;
+      const internalCourierCost = deliveryFee;
       const productsCost = products.reduce((sum, p) => sum + ((Number(p.price) || 0) * p.quantity), 0);
       const subtotal = totalPaper + totalColor + totalBinding + totalLamination + deliveryFee + productsCost;
       const total = subtotal;
@@ -905,7 +912,7 @@ export const PublicViews = {
         laminationCost: totalLamination,
         deliveryFee,
         deliveryZone: selectedZoneKey,
-        deliveryType: selectedZoneKey === 'Pickup' ? 'PICKUP' : 'FREE',
+        deliveryType: selectedZoneKey === 'Pickup' ? 'PICKUP' : (deliveryFee === 0 ? 'FREE' : 'DELIVERY'),
         productsCost,
         gst: 0,
         packageWeightKg: courierWeight.weightKg,
@@ -921,9 +928,15 @@ export const PublicViews = {
         bwPagesCount: rawBwPages,
         totalColorPrints,
         totalBWPrints: totalBwPrints,
+        colorCopies: totalColorCopies,
+        bwCopies: totalBwCopies,
+        totalPrintCopies: totalColorCopies + totalBwCopies,
         colorPaperRate,
         basePaperRate
       };
+
+      const totalBwPages = totalBwPrints;
+      const totalColorPages = totalColorPrints;
 
       const labelPrintCostEl = document.getElementById('label-print-cost');
       if (labelPrintCostEl) {
@@ -957,9 +970,15 @@ export const PublicViews = {
       if (laminationEl) laminationEl.innerText = formatCurrency(totalLamination);
 
       const deliveryRow = document.getElementById('row-delivery');
-      if (deliveryRow) deliveryRow.style.display = 'none';
+      if (deliveryRow) deliveryRow.style.display = '';
       const deliveryEl = document.getElementById('price-delivery');
-      if (deliveryEl) deliveryEl.innerText = 'FREE';
+      if (deliveryEl) {
+        deliveryEl.innerText = isPickup
+          ? 'FREE'
+          : `${formatCurrency(deliveryFee)} (${courierWeight.weightKg.toFixed(3)} KG)`;
+        deliveryEl.style.color = deliveryFee > 0 ? 'var(--text-main)' : '#059669';
+        deliveryEl.style.fontWeight = '800';
+      }
 
       const productsRow = document.getElementById('row-products');
       if (productsRow) productsRow.style.display = productsCost > 0 ? '' : 'none';
@@ -1037,8 +1056,29 @@ export const PublicViews = {
     }
 
     const deliverySelect = document.getElementById('cust-delivery-zone');
+    const deliveryAddressGroup = document.getElementById('delivery-address-group');
+    const deliveryAddress = document.getElementById('cust-address');
+
+    const updateDeliveryMethodUI = () => {
+      const isHomeDelivery = deliverySelect?.value === 'HomeDelivery';
+
+      if (deliveryAddressGroup) {
+        deliveryAddressGroup.style.display = isHomeDelivery ? '' : 'none';
+      }
+
+      if (deliveryAddress) {
+        deliveryAddress.required = isHomeDelivery;
+        if (!isHomeDelivery) {
+          deliveryAddress.value = '';
+        }
+      }
+
+      updateCalculations();
+    };
+
     if (deliverySelect) {
-      deliverySelect.onchange = () => updateCalculations();
+      deliverySelect.onchange = updateDeliveryMethodUI;
+      updateDeliveryMethodUI();
     }
 
     const setStep = (stepNum) => {
@@ -1092,6 +1132,8 @@ export const PublicViews = {
       printSide: 'Single',
       orientation: 'Portrait',
       copies: 1,
+      colorCopies: 1,
+      bwCopies: 1,
       binding: 'None',
       lamination: 'No',
       pageRange: `1-${totalPages}`,
@@ -1299,6 +1341,7 @@ export const PublicViews = {
                 <select class="form-select" style="font-size:0.82rem;" onchange="window.updateFileOption(${idx},'colorMode',this.value)">
                   <option value="Black & White" ${f.options.colorMode==='Black & White'?'selected':''}>⬛ ${I18nService.t('color_bw')}</option>
                   <option value="Color" ${f.options.colorMode==='Color'?'selected':''}>🎨 ${I18nService.t('color_full')}</option>
+                  <option value="Color + B&W Copies" ${f.options.colorMode==='Color + B&W Copies'?'selected':''}>🎨 + ⬛ Color & B&amp;W Copies</option>
                   <option value="Custom Split" ${f.options.colorMode==='Custom Split'?'selected':''}>🔀 ${I18nService.t('color_split')}</option>
                 </select>
               </div>
@@ -1316,10 +1359,21 @@ export const PublicViews = {
                   <option value="Landscape" ${f.options.orientation==='Landscape'?'selected':''}>${I18nService.t('landscape')}</option>
                 </select>
               </div>
+              ${f.options.colorMode === 'Color + B&W Copies' ? `
+              <div class="form-group" style="margin:0; padding:0.65rem; border:1px solid rgba(59,130,246,0.25); border-radius:10px; background:rgba(59,130,246,0.06);">
+                <label class="form-label" style="font-size:0.78rem; color:#2563eb;">🎨 Color Copies</label>
+                <input type="number" class="form-control" style="font-size:0.82rem;" min="1" max="500" value="${f.options.colorCopies || 1}" onchange="window.updateFileOption(${idx},'colorCopies',Math.max(1,parseInt(this.value)||1))">
+              </div>
+              <div class="form-group" style="margin:0; padding:0.65rem; border:1px solid rgba(100,116,139,0.3); border-radius:10px; background:rgba(100,116,139,0.06);">
+                <label class="form-label" style="font-size:0.78rem; color:#334155;">⬛ B&amp;W Copies</label>
+                <input type="number" class="form-control" style="font-size:0.82rem;" min="1" max="500" value="${f.options.bwCopies || 1}" onchange="window.updateFileOption(${idx},'bwCopies',Math.max(1,parseInt(this.value)||1))">
+              </div>
+              ` : `
               <div class="form-group" style="margin:0;">
                 <label class="form-label" style="font-size:0.78rem;">${I18nService.t('copies')}</label>
                 <input type="number" class="form-control" style="font-size:0.82rem;" min="1" max="500" value="${f.options.copies || 1}" onchange="window.updateFileOption(${idx},'copies',parseInt(this.value)||1)">
               </div>
+              `}
               <div class="form-group" style="margin:0;">
                 <label class="form-label" style="font-size:0.78rem; display:flex; justify-content:space-between; align-items:center;">
                   <span>${I18nService.t('calc_binding')}</span>
@@ -1345,23 +1399,41 @@ export const PublicViews = {
 
             <!-- Page Range & Color/B&W Page Selector Box -->
             <div style="background:var(--primary-light); padding:0.85rem 1rem; border-radius:10px; border:1px solid var(--border-color); margin-bottom:0.85rem; display:grid; grid-template-columns:1fr 1fr; gap:1rem; align-items:flex-start;">
+              ${f.options.colorMode === 'Color + B&W Copies' ? `
+              <div style="grid-column:1 / -1; padding:0.7rem 0.85rem; border-radius:9px; background:rgba(16,185,129,0.10); border:1px solid rgba(16,185,129,0.28); color:var(--text-main); font-size:0.8rem;">
+                <b>🎨 + ⬛ Mixed Copies:</b> The complete document will be printed in both modes. Enter the Color Copies and B&amp;W Copies above. Example: <b>Color 10 + B&amp;W 10 = 20 total copies.</b>
+              </div>
+              ` : ''}
               <div class="form-group" style="margin:0;">
                 <label class="form-label" style="font-size:0.78rem; font-weight:700; color:var(--primary);">
                   📄 Pages to Print (Doc Total: ${f.pages} pgs)
                 </label>
-                <input type="text" class="form-control" style="font-size:0.82rem;" placeholder="E.g., 1-${f.pages} or 1, 3, 5-20" value="${f.options.pageRange !== undefined ? f.options.pageRange : `1-${f.pages}`}" oninput="window.updateFileOption(${idx},'pageRange',this.value)">
+                <input type="text" id="page-range-${idx}" class="form-control" style="font-size:0.82rem;" placeholder="E.g., 1-${f.pages} or 1, 3, 5-20" value="${f.options.pageRange !== undefined ? f.options.pageRange : `1-${f.pages}`}" oninput="window.updateFileOption(${idx},'pageRange',this.value)">
+                <span id="page-range-error-${idx}" style="font-size:0.7rem; color:#dc2626; margin-top:0.2rem; display:${f.options.pageRange && !PricingEngine.validatePageRange(f.options.pageRange, f.pages, true).valid ? 'block' : 'none'};">
+                  ${f.options.pageRange ? PricingEngine.validatePageRange(f.options.pageRange, f.pages, true).message : ''}
+                </span>
                 <span style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem; display:block;">
                   Enter page ranges to print (e.g. <code>1-${f.pages}</code> or <code>1-50</code>).
                 </span>
               </div>
 
-              <div class="form-group" style="margin:0;">
+              <div class="form-group" style="margin:0; ${f.options.colorMode === 'Color + B&W Copies' ? 'opacity:0.65;' : ''}">
                 <label class="form-label" style="font-size:0.78rem; font-weight:700; color:${f.options.colorMode === 'Custom Split' ? '#10b981' : 'var(--text-main)'};">
                   🎨 Color Page Numbers / Ranges
                 </label>
-                <input type="text" class="form-control" style="font-size:0.82rem; ${f.options.colorMode === 'Custom Split' ? 'border-color:#10b981; box-shadow:0 0 0 2px rgba(16,185,129,0.2);' : ''}" placeholder="${f.options.colorMode === 'Color' ? 'All pages are Full Color' : f.options.colorMode === 'Black & White' ? 'All pages are Black & White' : 'E.g., 1, 5, 10-15'}" value="${f.options.colorPageRange || ''}" oninput="window.updateFileOption(${idx},'colorPageRange',this.value)">
+                <div style="display:flex; gap:0.4rem; align-items:center; margin-bottom:0.4rem; flex-wrap:wrap;">
+                  <button type="button" class="btn btn-sm btn-outline" style="font-size:0.7rem; padding:0.3rem 0.55rem;" onclick="window.setAllColorPages(${idx})" ${f.options.colorMode === 'Color + B&W Copies' ? 'disabled' : ''}>🎨 All Color</button>
+                  <button type="button" class="btn btn-sm btn-outline" style="font-size:0.7rem; padding:0.3rem 0.55rem;" onclick="window.setAllBWPages(${idx})" ${f.options.colorMode === 'Color + B&W Copies' ? 'disabled' : ''}>⬛ All B&amp;W</button>
+                  <span style="font-size:0.68rem; color:var(--text-muted);">Quick select</span>
+                </div>
+                <input type="text" id="color-range-${idx}" class="form-control" style="font-size:0.82rem; ${f.options.colorMode === 'Custom Split' ? 'border-color:#10b981; box-shadow:0 0 0 2px rgba(16,185,129,0.2);' : ''}" placeholder="${f.options.colorMode === 'Color' ? 'All pages are Full Color' : f.options.colorMode === 'Black & White' ? 'All pages are Black & White' : f.options.colorMode === 'Color + B&W Copies' ? 'Not needed for Mixed Copies' : 'E.g., 1, 5, 10-15'}" value="${f.options.colorMode === 'Color + B&W Copies' ? '' : (f.options.colorPageRange || '')}" ${f.options.colorMode === 'Color + B&W Copies' ? 'disabled' : ''} oninput="window.updateFileOption(${idx},'colorPageRange',this.value)">
+                <span id="color-range-error-${idx}" style="font-size:0.7rem; color:#dc2626; margin-top:0.2rem; display:${f.options.colorMode === 'Custom Split' && f.options.colorPageRange && !PricingEngine.validatePageRange(f.options.colorPageRange, f.pages, true).valid ? 'block' : 'none'};">
+                  ${f.options.colorMode === 'Custom Split' && f.options.colorPageRange ? PricingEngine.validatePageRange(f.options.colorPageRange, f.pages, true).message : ''}
+                </span>
                 <span style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem; display:block;">
-                  Enter page numbers to print in <b>Color</b> (e.g. <code>1, 5, 10-15</code>). Others print in <b>B&amp;W</b>.
+                  ${f.options.colorMode === 'Color + B&W Copies'
+                    ? 'Not required — the whole document is printed in both Color and B&amp;W.'
+                    : 'Enter page numbers to print in <b>Color</b> (e.g. <code>1, 5, 10-15</code>). Others print in <b>B&amp;W</b>.'}
                 </span>
               </div>
             </div>
@@ -1372,7 +1444,9 @@ export const PublicViews = {
                 <span style="font-weight:700; color:var(--text-main);">📊 Print Calculation:</span>
                 ${fileQuote.colorPagesCount > 0 ? `<span style="color:#10b981; font-weight:700; margin-left:0.4rem;">🎨 ${fileQuote.colorPagesCount} Color pgs (@ ${formatCurrency(fileQuote.colorPaperRate)})</span>` : ''}
                 ${fileQuote.bwPagesCount > 0 ? `<span style="color:var(--text-muted); font-weight:600; margin-left:0.4rem;">⬛ ${fileQuote.bwPagesCount} B&amp;W pgs (@ ${formatCurrency(fileQuote.basePaperRate)})</span>` : ''}
-                <span style="color:var(--text-muted); margin-left:0.3rem;">• ${f.options.copies || 1} copy(ies)</span>
+                ${f.options.colorMode === 'Color + B&W Copies'
+                ? `<span style="color:var(--text-muted); margin-left:0.3rem;">• 🎨 ${fileQuote.colorCopies} Color + ⬛ ${fileQuote.bwCopies} B&amp;W copies</span>`
+                : `<span style="color:var(--text-muted); margin-left:0.3rem;">• ${f.options.copies || 1} copy(ies)</span>`}
               </div>
               <div style="font-weight:800; color:var(--primary); font-size:0.875rem;">
                 File Cost: ${formatCurrency(fileQuote.paperCost + fileQuote.colorCost + fileQuote.bindingCost + fileQuote.laminationCost)}
@@ -1465,15 +1539,51 @@ export const PublicViews = {
       }
     };
 
+    window.setAllColorPages = (idx) => {
+      const f = state.files[idx];
+      if (!f) return;
+      f.options.colorMode = 'Custom Split';
+      f.options.colorPageRange = `1-${f.pages}`;
+      renderFileList();
+      updateCalculations();
+    };
+
+    window.setAllBWPages = (idx) => {
+      const f = state.files[idx];
+      if (!f) return;
+      f.options.colorMode = 'Custom Split';
+      f.options.colorPageRange = '';
+      renderFileList();
+      updateCalculations();
+    };
+
     window.updateFileOption = (idx, key, value) => {
       if (state.files[idx]) {
         state.files[idx].options[key] = value;
 
-        // Auto switch colorMode to Custom Split if typing in colorPageRange
+        // Auto switch colorMode to Custom Split if typing in colorPageRange.
         if (key === 'colorPageRange' && value.trim() !== '' && state.files[idx].options.colorMode !== 'Custom Split') {
           state.files[idx].options.colorMode = 'Custom Split';
           const selectEls = document.querySelectorAll(`#file-options-${idx} select`);
           if (selectEls && selectEls[2]) selectEls[2].value = 'Custom Split';
+        }
+
+        // Validate page ranges immediately without forcing a full re-render while typing.
+        if (key === 'pageRange' || key === 'colorPageRange') {
+          const maxPages = Math.max(1, Number(state.files[idx].pages) || 1);
+          const validation = PricingEngine.validatePageRange(String(value || ''), maxPages, true);
+          const errorEl = document.getElementById(key === 'colorPageRange' ? `color-range-error-${idx}` : `page-range-error-${idx}`);
+          if (errorEl) {
+            errorEl.textContent = validation.message;
+            errorEl.style.display = validation.valid ? 'none' : 'block';
+          }
+        }
+
+        // Re-render this file when switching print mode so the correct copy inputs appear.
+        if (key === 'colorMode') {
+          renderFileList();
+          updateCalculations();
+          return;
         }
 
         // Live update file price calculation breakdown
@@ -1486,7 +1596,9 @@ export const PublicViews = {
               <span style="font-weight:700; color:var(--text-main);">📊 Print Calculation:</span>
               ${fileQuote.colorPagesCount > 0 ? `<span style="color:#10b981; font-weight:700; margin-left:0.4rem;">🎨 ${fileQuote.colorPagesCount} Color pgs (@ ${formatCurrency(fileQuote.colorPaperRate)})</span>` : ''}
               ${fileQuote.bwPagesCount > 0 ? `<span style="color:var(--text-muted); font-weight:600; margin-left:0.4rem;">⬛ ${fileQuote.bwPagesCount} B&amp;W pgs (@ ${formatCurrency(fileQuote.basePaperRate)})</span>` : ''}
-              <span style="color:var(--text-muted); margin-left:0.3rem;">• ${f.options.copies || 1} copy(ies)</span>
+              ${f.options.colorMode === 'Color + B&W Copies'
+                ? `<span style="color:var(--text-muted); margin-left:0.3rem;">• 🎨 ${fileQuote.colorCopies} Color + ⬛ ${fileQuote.bwCopies} B&amp;W copies</span>`
+                : `<span style="color:var(--text-muted); margin-left:0.3rem;">• ${f.options.copies || 1} copy(ies)</span>`}
             </div>
             <div style="font-weight:800; color:var(--primary); font-size:0.875rem;">
               File Cost: ${formatCurrency(fileQuote.paperCost + fileQuote.colorCost + fileQuote.bindingCost + fileQuote.laminationCost)}
@@ -1509,6 +1621,22 @@ export const PublicViews = {
       updateCalculations();
     };
 
+    const validateAllFileRanges = () => {
+      for (let i = 0; i < state.files.length; i++) {
+        const f = state.files[i];
+        const pageValidation = PricingEngine.validatePageRange(f.options.pageRange ?? `1-${f.pages}`, f.pages, true);
+        const colorValidation = PricingEngine.validatePageRange(f.options.colorPageRange ?? '', f.pages, true);
+        if (!pageValidation.valid || !colorValidation.valid) {
+          const message = pageValidation.valid ? colorValidation.message : pageValidation.message;
+          NotificationService.showToast(`Please fix page ranges in ${f.name}: ${message}`, 'warning');
+          const panel = document.getElementById(`file-options-${i}`);
+          if (panel && panel.style.display === 'none') window.toggleFileOptions(i);
+          return false;
+        }
+      }
+      return true;
+    };
+
     // Step Navigation Event Handlers
     const btnToStep2 = document.getElementById('btn-to-step-2');
     if (btnToStep2) {
@@ -1517,6 +1645,7 @@ export const PublicViews = {
           NotificationService.showToast('Please upload at least one PDF document before continuing to Contact Details.', 'warning');
           return;
         }
+        if (!validateAllFileRanges()) return;
         updateCalculations();
         setStep(2);
       };
@@ -1536,10 +1665,19 @@ export const PublicViews = {
           return;
         }
 
+        const deliveryMethod = document.getElementById('cust-delivery-zone')?.value || 'Pickup';
+        const deliveryAddressValue = document.getElementById('cust-address')?.value.trim() || '';
+        if (deliveryMethod === 'HomeDelivery' && !deliveryAddressValue) {
+          NotificationService.showToast('Please enter your Home Delivery Address.', 'warning');
+          document.getElementById('cust-address')?.focus();
+          return;
+        }
+
         state.customer.name = name;
         state.customer.phone = phone;
         state.customer.email = document.getElementById('cust-email')?.value.trim() || '';
         state.customer.address = document.getElementById('cust-address')?.value.trim() || '';
+        if (!validateAllFileRanges()) return;
         updateCalculations();
         setStep(3);
       };
@@ -1576,6 +1714,14 @@ export const PublicViews = {
           setStep(2);
           return;
         }
+        const deliveryMethod = document.getElementById('cust-delivery-zone')?.value || 'Pickup';
+        const deliveryAddressValue = document.getElementById('cust-address')?.value.trim() || '';
+        if (deliveryMethod === 'HomeDelivery' && !deliveryAddressValue) {
+          NotificationService.showToast('Please enter your Home Delivery Address.', 'warning');
+          setStep(2);
+          document.getElementById('cust-address')?.focus();
+          return;
+        }
         updateCalculations();
         setStep(3);
       };
@@ -1605,6 +1751,14 @@ export const PublicViews = {
         if (!custName || !custPhone) {
           NotificationService.showToast('Please enter your Customer Name and Phone Number in Step 2.', 'warning');
           setStep(2);
+          return;
+        }
+
+        const finalDeliveryMethod = document.getElementById('cust-delivery-zone')?.value || 'Pickup';
+        if (finalDeliveryMethod === 'HomeDelivery' && !custAddress) {
+          NotificationService.showToast('Please enter your Home Delivery Address.', 'warning');
+          setStep(2);
+          document.getElementById('cust-address')?.focus();
           return;
         }
 
@@ -1734,12 +1888,12 @@ export const PublicViews = {
               paperSize: state.files[0]?.options?.paperSize || 'A4',
               gsm: state.files[0]?.options?.paperQuality || '70 GSM',
               colorPages: quote.colorPagesCount || 0,
-              colorCopies: state.files[0]?.options?.copies || 1,
+              colorCopies: quote.colorCopies || state.files[0]?.options?.colorCopies || state.files[0]?.options?.copies || 1,
               colorRate: quote.colorPaperRate || 6.00,
               colorAmount: quote.colorCost || 0,
               totalColorPrints: quote.totalColorPrints || 0,
               bwPages: quote.bwPagesCount || 0,
-              bwCopies: state.files[0]?.options?.copies || 1,
+              bwCopies: quote.bwCopies || state.files[0]?.options?.bwCopies || state.files[0]?.options?.copies || 1,
               bwRate: quote.basePaperRate || 1.50,
               bwAmount: quote.paperCost || 0,
               totalBWPrints: quote.totalBWPrints || 0,
@@ -1757,7 +1911,7 @@ export const PublicViews = {
               packagingWeightGrams: quote.packagingWeightGrams || 0,
               courierName: settings.courierPricing?.courierName || 'ST Courier',
               courierCost: quote.internalCourierCost || 0,
-              customerDeliveryCharge: 0,
+              customerDeliveryCharge: quote.deliveryFee || 0,
               deliveryType: quote.deliveryType || 'FREE'
             },
             payment: {
