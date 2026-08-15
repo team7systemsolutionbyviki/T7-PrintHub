@@ -2300,6 +2300,21 @@ Thank you for choosing ${settings.shopName}!
             <label class="form-label">Google Map Embed URL</label>
             <input type="text" class="form-control" id="st-map" value="${settings.googleMapUrl || ''}">
           </div>
+
+          <div style="margin-top:1.5rem;padding:1.25rem;border:1px solid var(--border-color);border-radius:14px;background:var(--bg-body);">
+            <h3 style="margin:0 0 .35rem;">🚚 Courier Pricing & Free Delivery</h3>
+            <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem;">Internal courier cost. Customers see FREE DELIVERY.</p>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;">
+              <div class="form-group"><label class="form-label">Courier</label><input class="form-control" id="st-courier-name" value="${settings.courierPricing?.courierName || 'ST Courier'}"></div>
+              <div class="form-group"><label class="form-label">Base Weight (KG)</label><input type="number" step="0.01" min="0.01" class="form-control" id="st-courier-base-kg" value="${Number(settings.courierPricing?.baseWeightKg ?? 1)}"></div>
+              <div class="form-group"><label class="form-label">Base Cost (₹)</label><input type="number" step="0.01" min="0" class="form-control" id="st-courier-base-cost" value="${Number(settings.courierPricing?.baseCost ?? 60)}"></div>
+              <div class="form-group"><label class="form-label">Additional Slab (KG)</label><input type="number" step="0.01" min="0.01" class="form-control" id="st-courier-add-kg" value="${Number(settings.courierPricing?.additionalWeightKg ?? .5)}"></div>
+              <div class="form-group"><label class="form-label">Additional Slab Cost (₹)</label><input type="number" step="0.01" min="0" class="form-control" id="st-courier-add-cost" value="${Number(settings.courierPricing?.additionalCost ?? 40)}"></div>
+              <div class="form-group"><label class="form-label">Default Packing Weight (g)</label><input type="number" step="1" min="0" class="form-control" id="st-courier-pack-g" value="${Number(settings.courierPricing?.packagingWeightGrams ?? 50)}"></div>
+              <div class="form-group"><label class="form-label">Binding Weight (g)</label><input type="number" step="1" min="0" class="form-control" id="st-courier-bind-g" value="${Number(settings.courierPricing?.bindingWeightGrams ?? 30)}"></div>
+              <label style="display:flex;align-items:center;gap:.5rem;font-weight:700;padding-top:1.8rem;"><input type="checkbox" id="st-free-delivery" ${settings.courierPricing?.freeDelivery !== false ? 'checked' : ''}> FREE DELIVERY to customer</label>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -2323,6 +2338,16 @@ Thank you for choosing ${settings.shopName}!
         email: document.getElementById('st-email').value.trim(),
         address: document.getElementById('st-address').value.trim(),
         googleMapUrl: document.getElementById('st-map').value.trim(),
+        courierPricing: {
+          courierName: document.getElementById('st-courier-name').value.trim() || 'ST Courier',
+          baseWeightKg: Number(document.getElementById('st-courier-base-kg').value) || 1,
+          baseCost: Number(document.getElementById('st-courier-base-cost').value) || 60,
+          additionalWeightKg: Number(document.getElementById('st-courier-add-kg').value) || 0.5,
+          additionalCost: Number(document.getElementById('st-courier-add-cost').value) || 40,
+          packagingWeightGrams: Number(document.getElementById('st-courier-pack-g').value) || 0,
+          bindingWeightGrams: Number(document.getElementById('st-courier-bind-g').value) || 0,
+          freeDelivery: document.getElementById('st-free-delivery').checked
+        },
       };
 
       try {
@@ -2343,115 +2368,301 @@ Thank you for choosing ${settings.shopName}!
   async renderCatalog() {
     const catalog = await DBService.getServicesCatalog();
     const products = await DBService.getProductsCatalog();
-    const activeTab = new URLSearchParams(window.location.hash.split('?')[1] || '').get('tab') || 'printing';
+
+    const hashQuery = (window.location.hash.split('?')[1] || '');
+    const activeTab = new URLSearchParams(hashQuery).get('tab') === 'stationery'
+      ? 'stationery'
+      : 'printing';
+
+    const esc = (value) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+    const serviceRows = catalog.length === 0 ? `
+      <tr>
+        <td colspan="8" class="text-center text-muted" style="padding:3rem;">
+          No services created in catalog yet.
+        </td>
+      </tr>
+    ` : catalog.map(s => `
+      <tr>
+        <td style="font-size:1.5rem;text-align:center;">${esc(s.icon || '📄')}</td>
+        <td>
+          <b>${esc(s.title || 'Untitled Service')}</b>
+          <div style="font-size:.75rem;color:var(--text-muted);">ID: ${esc(s.id)}</div>
+        </td>
+        <td><span class="badge badge-waiting" style="font-size:.75rem;">${esc(s.category || 'General')}</span></td>
+        <td><b style="color:var(--primary);">${esc(s.startingPrice || formatServicePrice(s))}</b></td>
+        <td style="font-size:.825rem;color:var(--text-muted);max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(s.description || '')}">
+          ${esc(s.description || '')}
+        </td>
+        <td>${s.popular ? '<span class="badge badge-approved">Popular</span>' : '<span class="badge" style="background:var(--border-color);color:var(--text-muted);">Standard</span>'}</td>
+        <td>${s.status === 'Inactive'
+          ? '<span class="badge badge-rejected">● Inactive</span>'
+          : '<span class="badge badge-approved">● Active</span>'}</td>
+        <td>
+          <div style="display:flex;gap:.35rem;">
+            <button class="btn btn-sm btn-outline" onclick="window.openCatalogModal('${esc(s.id)}')">✏️ Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="window.deleteCatalogItem('${esc(s.id)}')">🗑️ Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    const productRows = products.length === 0 ? `
+      <tr>
+        <td colspan="8" class="text-center text-muted" style="padding:3rem;">
+          No products found.
+        </td>
+      </tr>
+    ` : products.map(p => `
+      <tr>
+        <td style="font-size:1.5rem;text-align:center;">${esc(p.icon || '📦')}</td>
+        <td>
+          <b>${esc(p.name || 'Unnamed Product')}</b>
+          <div style="font-size:.75rem;color:var(--text-muted);">ID: ${esc(p.id)}</div>
+        </td>
+        <td><span class="badge badge-waiting" style="font-size:.75rem;">${esc(p.category || 'Accessory')}</span></td>
+        <td><b style="color:var(--primary);">${formatCurrency(Number(p.price) || 0)}</b></td>
+        <td><b>${Number(p.weightGrams || 0)} g</b><div style="font-size:.7rem;color:var(--text-muted);">+ ${Number(p.packagingWeightGrams || 0)} g pack</div></td>
+        <td style="font-size:.825rem;color:var(--text-muted);max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(p.description || '')}">
+          ${esc(p.description || '')}
+        </td>
+        <td>${p.popular ? '<span class="badge badge-approved">Popular</span>' : '<span class="badge" style="background:var(--border-color);color:var(--text-muted);">Standard</span>'}</td>
+        <td>${p.status === 'Inactive' || p.stockStatus === 'Out of Stock'
+          ? `<span class="badge badge-rejected">● ${p.status === 'Inactive' ? 'Inactive' : 'Out of Stock'}</span>`
+          : '<span class="badge badge-approved">● In Stock / Active</span>'}</td>
+        <td>
+          <div style="display:flex;gap:.35rem;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-outline" onclick="window.openProductModal('${esc(p.id)}')">✏️ Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="window.deleteProductItem('${esc(p.id)}')">🗑️ Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
 
     const html = `
       <div class="table-card">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; padding:1.25rem; border-bottom:1px solid var(--border-color);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;padding:1.25rem;border-bottom:1px solid var(--border-color);">
           <div>
             <h3>Catalog & Products</h3>
-            <p class="text-muted" style="font-size:0.85rem; margin-top:0.25rem;">Manage printing services and stationery/shop products displayed to customers.</p>
+            <p class="text-muted" style="font-size:.85rem;margin-top:.25rem;">
+              Manage printing services and stationery/shop products displayed to customers.
+            </p>
           </div>
-          <a href="${activeTab === 'stationery' ? '#services' : '#services'}" class="btn btn-outline">👁️ View Customer Catalog ↗</a>
+          <a href="#services" class="btn btn-outline">👁️ View Customer Catalog ↗</a>
         </div>
 
-        <div style="display:flex; gap:0.5rem; padding:1rem 1.25rem; border-bottom:1px solid var(--border-color); flex-wrap:wrap;">
-          <button class="btn ${activeTab === 'printing' ? 'btn-primary' : 'btn-outline'}" onclick="window.switchCatalogTab('printing')">🖨️ Printing Services Catalog</button>
-          <button class="btn ${activeTab === 'stationery' ? 'btn-primary' : 'btn-outline'}" onclick="window.switchCatalogTab('stationery')">✏️ Stationery & Shop Sales</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;padding:1rem 1.25rem;border-bottom:1px solid var(--border-color);flex-wrap:wrap;">
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+            <button class="btn ${activeTab === 'printing' ? 'btn-primary' : 'btn-outline'}" onclick="window.switchCatalogTab('printing')">
+              🖨️ Printing Services Catalog
+            </button>
+            <button class="btn ${activeTab === 'stationery' ? 'btn-primary' : 'btn-outline'}" onclick="window.switchCatalogTab('stationery')">
+              ✏️ Stationery & Shop Products
+            </button>
+          </div>
+          ${activeTab === 'stationery'
+            ? '<button class="btn btn-success" onclick="window.openProductModal()">➕ Add Product</button>'
+            : '<button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add Service</button>'}
         </div>
 
-        <div class="table-responsive">
-          <table class="data-table" id="catalog-table">
-            <thead>
-              <tr>
-                <th>Icon</th>
-                <th>Service Title</th>
-                <th>Category</th>
-                <th>Starting Rate</th>
-                <th>Description</th>
-                <th>Badge</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${catalog.length === 0 ? `
-                <tr>
-                  <td colspan="8" class="text-center text-muted" style="padding:3rem;">
-                    No services created in catalog yet. Click "+ Add New Service Offer" to create one.
-                  </td>
-                </tr>
-              ` : catalog.map(s => `
-                <tr>
-                  <td style="font-size:1.5rem; text-align:center;">${s.icon || '📄'}</td>
-                  <td>
-                    <b>${s.title}</b>
-                    <div style="font-size:0.75rem; color:var(--text-muted);">ID: ${s.id}</div>
-                  </td>
-                  <td><span class="badge badge-waiting" style="font-size:0.75rem;">${s.category || 'General'}</span></td>
-                  <td><b style="color:var(--primary);">${s.startingPrice}</b></td>
-                  <td style="font-size:0.825rem; color:var(--text-muted); max-width:250px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${s.description}">
-                    ${s.description}
-                  </td>
-                  <td>
-                    ${s.popular ? '<span class="badge badge-approved">Popular</span>' : '<span class="badge" style="background:var(--border-color); color:var(--text-muted);">Standard</span>'}
-                  </td>
-                  <td>
-                    ${s.status === 'Inactive' ? '<span class="badge badge-rejected">● Inactive</span>' : '<span class="badge badge-approved">● Active</span>'}
-                  </td>
-                  <td>
-                    <div style="display:flex; gap:0.35rem;">
-                      <button class="btn btn-sm btn-outline" style="padding:0.25rem 0.5rem;" onclick="window.openCatalogModal('${s.id}')">✏️ Edit</button>
-                      <button class="btn btn-sm btn-danger" style="padding:0.25rem 0.5rem;" onclick="window.deleteCatalogItem('${s.id}')">🗑️ Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+        <div style="padding:1rem 1.25rem;">
+          <div class="table-responsive">
+            ${activeTab === 'printing' ? `
+              <table class="data-table" id="catalog-table">
+                <thead>
+                  <tr>
+                    <th>Icon</th><th>Service Title</th><th>Category</th><th>Starting Rate</th>
+                    <th>Description</th><th>Badge</th><th>Status</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>${serviceRows}</tbody>
+              </table>
+            ` : `
+              <table class="data-table" id="products-table">
+                <thead>
+                  <tr>
+                    <th>Icon</th><th>Product</th><th>Category</th><th>Price</th><th>Weight</th>
+                    <th>Description</th><th>Badge</th><th>Stock / Status</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>${productRows}</tbody>
+              </table>
+            `}
+          </div>
         </div>
       </div>
     `;
 
     await this.renderAdminLayout('catalog', html);
 
+    // Define handlers AFTER the page exists. Both tabs now use their own
+    // correct renderer and never execute a product handler on service data.
     window.switchCatalogTab = (tab) => {
-      window.location.hash = `#admin-catalog?tab=${tab}`;
+      window.location.hash = `#admin-catalog?tab=${tab === 'stationery' ? 'stationery' : 'printing'}`;
     };
 
     window.openProductModal = async (productId = null) => {
-      const allItems = await DBService.getProductsCatalog();
-      const existing = productId ? allItems.find(item => item.id === productId) : null;
+      try {
+        const allItems = await DBService.getProductsCatalog();
+        const existing = productId ? allItems.find(item => item.id === productId) : null;
+
+        const categories = ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
+        const modalHTML = `
+          <form id="product-form" onsubmit="event.preventDefault(); window.saveProductForm('${esc(productId || '')}');">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+              <div class="form-group">
+                <label class="form-label">Product Name *</label>
+                <input type="text" class="form-control" id="prod-name" value="${esc(existing?.name || '')}" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Category *</label>
+                <select class="form-select" id="prod-category">
+                  ${categories.map(c => `<option value="${esc(c)}" ${existing?.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+              <div class="form-group">
+                <label class="form-label">Price (₹) *</label>
+                <input type="number" class="form-control" id="prod-price" value="${Number(existing?.price) || 0}" min="0" step="0.01" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Product Weight (g) *</label>
+                <input type="number" class="form-control" id="prod-weight" value="${Number(existing?.weightGrams) || 0}" min="0" step="0.1" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Product Packaging Weight (g)</label>
+                <input type="number" class="form-control" id="prod-pack-weight" value="${Number(existing?.packagingWeightGrams) || 0}" min="0" step="0.1">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Icon Emoji</label>
+                <input type="text" class="form-control" id="prod-icon" value="${esc(existing?.icon || '📦')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Stock Status</label>
+                <select class="form-select" id="prod-stock">
+                  <option value="In Stock" ${existing?.stockStatus !== 'Out of Stock' ? 'selected' : ''}>In Stock</option>
+                  <option value="Out of Stock" ${existing?.stockStatus === 'Out of Stock' ? 'selected' : ''}>Out of Stock</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Description *</label>
+              <textarea class="form-control" id="prod-desc" rows="3" required>${esc(existing?.description || '')}</textarea>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+              <div class="form-group">
+                <label class="form-label">Product Status</label>
+                <select class="form-select" id="prod-status">
+                  <option value="Active" ${existing?.status !== 'Inactive' ? 'selected' : ''}>Active</option>
+                  <option value="Inactive" ${existing?.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+                </select>
+              </div>
+              <label style="display:flex;align-items:center;gap:.5rem;padding-top:1.8rem;font-weight:600;">
+                <input type="checkbox" id="prod-popular" ${existing?.popular ? 'checked' : ''} style="width:18px;height:18px;">
+                Popular Badge
+              </label>
+            </div>
+
+            <div style="display:flex;justify-content:flex-end;gap:.75rem;margin-top:1.5rem;">
+              <button type="button" class="btn btn-secondary" onclick="window.ModalComponent?.close()">Cancel</button>
+              <button type="submit" class="btn btn-success">💾 ${productId ? 'Update Product' : 'Create Product'}</button>
+            </div>
+          </form>
+        `;
+
+        const modal = window.ModalComponent;
+        if (!modal?.show) throw new Error('Modal component is not available');
+        modal.show({ title: productId ? '✏️ Edit Product' : '➕ Add Product', bodyHTML: modalHTML, width: '700px' });
+      } catch (err) {
+        console.error('[CATALOG] Product modal failed:', err);
+        NotificationService.showToast(`Unable to open product editor: ${err.message}`, 'error');
+      }
+    };
+
+    window.saveProductForm = async (productId = '') => {
+      const name = document.getElementById('prod-name')?.value.trim();
+      const category = document.getElementById('prod-category')?.value || 'Accessory';
+      const price = Number(document.getElementById('prod-price')?.value);
+      const weightGrams = Number(document.getElementById('prod-weight')?.value);
+      const packagingWeightGrams = Number(document.getElementById('prod-pack-weight')?.value || 0);
+      const icon = document.getElementById('prod-icon')?.value.trim() || '📦';
+      const stockStatus = document.getElementById('prod-stock')?.value || 'In Stock';
+      const description = document.getElementById('prod-desc')?.value.trim();
+      const status = document.getElementById('prod-status')?.value || 'Active';
+      const popular = !!document.getElementById('prod-popular')?.checked;
+
+      if (!name || !description || !Number.isFinite(price) || price < 0 || !Number.isFinite(weightGrams) || weightGrams < 0 || !Number.isFinite(packagingWeightGrams) || packagingWeightGrams < 0) {
+        NotificationService.showToast('Please enter a valid product name, description and price.', 'warning');
+        return;
+      }
+
+      try {
+        await DBService.saveProductItem({
+          ...(productId ? { id: productId } : {}),
+          name, category, price, weightGrams, packagingWeightGrams, icon, stockStatus, description, status, popular
+        });
+
+        window.ModalComponent?.close();
+        NotificationService.showToast(productId ? 'Product updated successfully!' : 'Product created successfully!', 'success');
+        await this.renderCatalog();
+      } catch (err) {
+        console.error('[CATALOG] Product save failed:', err);
+        NotificationService.showToast('Failed to save product. Check Firebase connection/permissions.', 'error');
+      }
+    };
+
+    window.deleteProductItem = async (productId) => {
+      if (!productId) return;
+      if (!confirm('Delete this product from the catalog?')) return;
+
+      try {
+        await DBService.deleteProductItem(productId);
+        NotificationService.showToast('Product deleted.', 'info');
+        await this.renderCatalog();
+      } catch (err) {
+        console.error('[CATALOG] Product delete failed:', err);
+        NotificationService.showToast('Failed to delete product. Check Firebase permissions.', 'error');
+      }
+    };
+
+    window.openCatalogModal = async (serviceId = null) => {
+      const allItems = await DBService.getServicesCatalog();
+      const existing = serviceId ? allItems.find(item => item.id === serviceId) : null;
+
       const modalHTML = `
-        <form id="product-form" onsubmit="event.preventDefault(); window.saveProductForm('${productId || ''}');">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-            <div class="form-group"><label class="form-label">Product Name *</label><input type="text" class="form-control" id="prod-name" value="${existing?.name || ''}" placeholder="e.g. Gel Pen Blue" required></div>
-            <div class="form-group"><label class="form-label">Category *</label><select class="form-select" id="prod-category" required>
-              ${['Pen','Pencil','Folder','Notebook','Accessory'].map(c => `<option value="${c}" ${existing?.category === c ? 'selected' : ''}>${c}</option>`).join('')}
-            </select></div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
-            <div class="form-group"><label class="form-label">Price (₹) *</label><input type="number" class="form-control" id="prod-price" value="${existing?.price ?? 0}" min="0" step="0.01" required></div>
-            <div class="form-group"><label class="form-label">Icon Emoji</label><input type="text" class="form-control" id="prod-icon" value="${existing?.icon || '📦'}" placeholder="🖋️"></div>
-            <div class="form-group"><label class="form-label">Stock Status</label><select class="form-select" id="prod-stock"><option value="In Stock" ${existing?.stockStatus !== 'Out of Stock' ? 'selected' : ''}>In Stock</option><option value="Out of Stock" ${existing?.stockStatus === 'Out of Stock' ? 'selected' : ''}>Out of Stock</option></select></div>
-          </div>
-          <div class="form-group"><label class="form-label">Description *</label><textarea class="form-control" id="prod-desc" rows="3" required>${existing?.description || ''}</textarea></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-            <div class="form-group"><label class="form-label">Product Status</label><select class="form-select" id="prod-status"><option value="Active" ${existing?.status !== 'Inactive' ? 'selected' : ''}>Active</option><option value="Inactive" ${existing?.status === 'Inactive' ? 'selected' : ''}>Inactive</option></select></div>
-            <div class="form-group" style="display:flex;align-items:center;gap:0.5rem;padding-top:1.8rem;"><input type="checkbox" id="prod-popular" ${existing?.popular ? 'checked' : ''} style="width:18px;height:18px;"><label for="prod-popular" style="margin:0;font-weight:600;">Popular Badge</label></div>
+        <form id="catalog-form" onsubmit="event.preventDefault(); window.saveCatalogForm('${esc(serviceId || '')}');">
+          <div class="form-group">
+            <label class="form-label">Service Title *</label>
+            <input type="text" class="form-control" id="cat-title" value="${esc(existing?.title || '')}" required>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div class="form-group">
+              <label class="form-label">Category</label>
+              <input type="text" class="form-control" id="cat-category" value="${esc(existing?.category || 'General Printing')}">
+            </div>
             <div class="form-group">
               <label class="form-label">Starting Price Tag *</label>
-              <input type="text" class="form-control" id="cat-price" value="${existing?.startingPrice || '₹10.00 / unit'}" placeholder="E.g., ₹25.00 / sheet" required>
+              <input type="text" class="form-control" id="cat-price" value="${esc(existing?.startingPrice || '')}" placeholder="₹25 / sheet" required>
             </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
             <div class="form-group">
               <label class="form-label">Icon Emoji</label>
-              <input type="text" class="form-control" id="cat-icon" value="${existing?.icon || '📄'}" placeholder="E.g., 📄, 📸, 📚, 🏷️">
+              <input type="text" class="form-control" id="cat-icon" value="${esc(existing?.icon || '📄')}">
             </div>
             <div class="form-group">
-              <label class="form-label">Catalog Status</label>
+              <label class="form-label">Status</label>
               <select class="form-select" id="cat-status">
                 <option value="Active" ${existing?.status !== 'Inactive' ? 'selected' : ''}>Active</option>
                 <option value="Inactive" ${existing?.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
@@ -2460,54 +2671,75 @@ Thank you for choosing ${settings.shopName}!
           </div>
 
           <div class="form-group">
-            <label class="form-label">Service Description *</label>
-            <textarea class="form-control" id="cat-desc" rows="3" placeholder="Brief description of service offerings for customers..." required>${existing?.description || ''}</textarea>
+            <label class="form-label">Description *</label>
+            <textarea class="form-control" id="cat-desc" rows="3" required>${esc(existing?.description || '')}</textarea>
           </div>
 
-          <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
-            <input type="checkbox" id="cat-popular" ${existing?.popular ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;">
-            <label for="cat-popular" style="margin:0; font-weight:600; cursor:pointer;">Highlight as "Popular Service" Badge</label>
-          </div>
+          <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;">
+            <input type="checkbox" id="cat-popular" ${existing?.popular ? 'checked' : ''} style="width:18px;height:18px;">
+            Highlight as Popular Service
+          </label>
 
-          <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
-            <button type="button" class="btn btn-secondary" onclick="if(window.ModalComponent) window.ModalComponent.close(); else document.getElementById('active-modal-overlay')?.remove();">Cancel</button>
-            <button type="submit" class="btn btn-success">💾 ${serviceId ? 'Update Service' : 'Create New Service'}</button>
+          <div style="display:flex;justify-content:flex-end;gap:.75rem;margin-top:1.5rem;">
+            <button type="button" class="btn btn-secondary" onclick="window.ModalComponent?.close()">Cancel</button>
+            <button type="submit" class="btn btn-success">💾 ${serviceId ? 'Update Service' : 'Create Service'}</button>
           </div>
         </form>
       `;
 
-      const modal = ModalComponent || window.ModalComponent;
-      if (modal) modal.show({ title: serviceId ? '✏️ Edit Service' : '➕ Add Service', bodyHTML: modalHTML, width: '650px' });
+      const modal = window.ModalComponent;
+      if (!modal?.show) {
+        NotificationService.showToast('Unable to open service editor.', 'error');
+        return;
+      }
+      modal.show({
+        title: serviceId ? '✏️ Edit Service' : '➕ Add Service',
+        bodyHTML: modalHTML,
+        width: '650px'
+      });
     };
-    window.saveCatalogForm = async (serviceId) => {
+
+    window.saveCatalogForm = async (serviceId = '') => {
       const title = document.getElementById('cat-title')?.value.trim();
-      const category = document.getElementById('cat-category')?.value.trim();
+      const category = document.getElementById('cat-category')?.value.trim() || 'General Printing';
       const startingPrice = document.getElementById('cat-price')?.value.trim();
       const icon = document.getElementById('cat-icon')?.value.trim() || '📄';
       const status = document.getElementById('cat-status')?.value || 'Active';
       const description = document.getElementById('cat-desc')?.value.trim();
-      const popular = document.getElementById('cat-popular')?.checked || false;
+      const popular = !!document.getElementById('cat-popular')?.checked;
 
       if (!title || !startingPrice || !description) {
         NotificationService.showToast('Please fill out all required service fields.', 'warning');
         return;
       }
 
-      await DBService.saveCatalogItem({
-        ...(serviceId ? { id: serviceId } : {}),
-        title,
-        category,
-        startingPrice,
-        icon,
-        status,
-        description,
-        popular
-      });
+      try {
+        await DBService.saveCatalogItem({
+          ...(serviceId ? { id: serviceId } : {}),
+          title, category, startingPrice, icon, status, description, popular
+        });
 
-      if (window.ModalComponent) window.ModalComponent.close();
-      NotificationService.showToast(serviceId ? 'Service catalog item updated!' : 'New service offering added!', 'success');
-      this.renderCatalog();
+        window.ModalComponent?.close();
+        NotificationService.showToast(serviceId ? 'Service updated successfully!' : 'Service created successfully!', 'success');
+        await this.renderCatalog();
+      } catch (err) {
+        console.error('[CATALOG] Service save failed:', err);
+        NotificationService.showToast('Failed to save service. Check Firebase connection/permissions.', 'error');
+      }
     };
-    window.deleteCatalogItem = async (serviceId) => { if (confirm('Delete this service from the catalog?')) { await DBService.deleteCatalogItem(serviceId); NotificationService.showToast('Service deleted.', 'info'); this.renderCatalog(); } };
+
+    window.deleteCatalogItem = async (serviceId) => {
+      if (!serviceId) return;
+      if (!confirm('Delete this service from the catalog?')) return;
+
+      try {
+        await DBService.deleteCatalogItem(serviceId);
+        NotificationService.showToast('Service deleted.', 'info');
+        await this.renderCatalog();
+      } catch (err) {
+        console.error('[CATALOG] Service delete failed:', err);
+        NotificationService.showToast('Failed to delete service.', 'error');
+      }
+    };
   }
 };

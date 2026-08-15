@@ -706,6 +706,14 @@ export const PublicViews = {
                 <span>🛍️ Products / Accessories</span>
                 <span id="price-products">₹0.00</span>
               </div>
+              <div class="price-row">
+                <span>📦 Package Weight</span>
+                <span id="package-weight-display">—</span>
+              </div>
+              <div class="price-row">
+                <span>🚚 Delivery</span>
+                <span style="color:#059669;font-weight:800;">FREE</span>
+              </div>
 
               <div id="summary-products-list" style="display:none; margin:0.25rem 0 0.75rem; font-size:0.78rem; color:var(--text-muted);"></div>
 
@@ -749,7 +757,7 @@ export const PublicViews = {
             <div style="width:42px; height:42px; border-radius:10px; background:var(--primary-light); display:flex; align-items:center; justify-content:center; font-size:1.35rem;">${escapeHtml(p.icon || '🛍️')}</div>
             <div style="min-width:0;">
               <div style="font-weight:750; font-size:0.86rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.name)}</div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.15rem;">${escapeHtml(p.category || 'Accessory')} • ${formatCurrency(price)} each</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.15rem;">${escapeHtml(p.category || 'Accessory')} • ${formatCurrency(price)} each • ${Number(p.weightGrams || 0)} g</div>
             </div>
             <div style="display:flex; align-items:center; gap:0.35rem;">
               <button type="button" class="btn btn-sm btn-secondary order-product-minus" data-product-id="${escapeHtml(p.id)}" style="width:32px; height:32px; padding:0;">−</button>
@@ -773,6 +781,86 @@ export const PublicViews = {
     };
 
     renderOrderProducts();
+
+    // ── COURIER WEIGHT / FREE DELIVERY ENGINE ─────────────────────────────
+    const getNumericGsm = (value) => {
+      const m = String(value || '').match(/(\d+(?:\.\d+)?)/);
+      return m ? Number(m[1]) : 70;
+    };
+
+    const paperAreaM2 = {
+      A4: 0.06237,
+      A5: 0.03108,
+      A3: 0.12474,
+      Legal: 0.07690,
+      Letter: 0.06035
+    };
+
+    const calculateCourierCost = (weightKg) => {
+      const cp = settings.courierPricing || {};
+      const baseKg = Number(cp.baseWeightKg ?? 1) || 1;
+      const baseCost = Number(cp.baseCost ?? 60) || 60;
+      const slabKg = Number(cp.additionalWeightKg ?? 0.5) || 0.5;
+      const slabCost = Number(cp.additionalCost ?? 40) || 40;
+      const w = Math.max(0, Number(weightKg) || 0);
+
+      if (w <= 0) return 0;
+      if (w <= baseKg) return Number(baseCost.toFixed(2));
+
+      const slabs = Math.ceil((w - baseKg) / slabKg - 1e-10);
+      return Number((baseCost + Math.max(0, slabs) * slabCost).toFixed(2));
+    };
+
+    const calculatePackageWeight = () => {
+      let printWeightGrams = 0;
+      let bindingWeightGrams = 0;
+      let productWeightGrams = 0;
+
+      // Printing: courier weight is based on PHYSICAL SHEETS, not PDF pages.
+      state.files.forEach(f => {
+        const opts = f.options || {};
+        const pages = Math.max(1, Number(f.pages || f.pageCount || 1) || 1);
+        const copies = Math.max(1, parseInt(opts.copies, 10) || 1);
+        const paperSize = opts.paperSize || 'A4';
+        const gsm = getNumericGsm(opts.paperQuality || '70 GSM');
+        const area = paperAreaM2[paperSize] || paperAreaM2.A4;
+
+        const physicalSheetsPerCopy = String(opts.printSide || 'Single').toLowerCase().includes('double')
+          ? Math.ceil(pages / 2)
+          : pages;
+
+        printWeightGrams += physicalSheetsPerCopy * copies * area * gsm;
+
+        if (opts.binding && opts.binding !== 'None') {
+          bindingWeightGrams += Number(settings.courierPricing?.bindingWeightGrams ?? 30) || 0;
+        }
+      });
+
+      getSelectedProducts().forEach(p => {
+        const qty = Math.max(0, Number(p.quantity) || 0);
+        productWeightGrams += qty * (
+          Math.max(0, Number(p.weightGrams) || 0) +
+          Math.max(0, Number(p.packagingWeightGrams) || 0)
+        );
+      });
+
+      const packingWeightGrams = state.files.length > 0 || getSelectedProducts().length > 0
+        ? Math.max(0, Number(settings.courierPricing?.packagingWeightGrams ?? 50) || 0)
+        : 0;
+
+      const totalGrams = Math.ceil(printWeightGrams + productWeightGrams + bindingWeightGrams + packingWeightGrams);
+      const weightKg = Number((totalGrams / 1000).toFixed(3));
+
+      return {
+        printWeightGrams: Math.round(printWeightGrams),
+        productWeightGrams: Math.round(productWeightGrams),
+        bindingWeightGrams: Math.round(bindingWeightGrams),
+        packingWeightGrams: Math.round(packingWeightGrams),
+        totalGrams,
+        weightKg,
+        courierCost: calculateCourierCost(weightKg)
+      };
+    };
 
     const updateCalculations = () => {
       const selectedZoneKey = document.getElementById('cust-delivery-zone')?.value || 'Pickup';
@@ -800,10 +888,13 @@ export const PublicViews = {
         if (q.basePaperRate) basePaperRate = q.basePaperRate;
       });
 
-      const deliveryZones = pricing.deliveryZones || {};
-      const deliveryFee = Number((deliveryZones[selectedZoneKey]?.fee || 0).toFixed(2));
-
+      const courierWeight = calculatePackageWeight();
       const products = getSelectedProducts();
+
+      // Customer delivery is FREE. Courier cost is an INTERNAL business cost.
+      // Pickup has no courier cost.
+      const deliveryFee = 0;
+      const internalCourierCost = selectedZoneKey === 'Pickup' ? 0 : courierWeight.courierCost;
       const productsCost = products.reduce((sum, p) => sum + ((Number(p.price) || 0) * p.quantity), 0);
       const subtotal = totalPaper + totalColor + totalBinding + totalLamination + deliveryFee + productsCost;
       const total = subtotal;
@@ -814,8 +905,17 @@ export const PublicViews = {
         laminationCost: totalLamination,
         deliveryFee,
         deliveryZone: selectedZoneKey,
+        deliveryType: selectedZoneKey === 'Pickup' ? 'PICKUP' : 'FREE',
         productsCost,
         gst: 0,
+        packageWeightKg: courierWeight.weightKg,
+        packageWeightGrams: courierWeight.totalGrams,
+        printWeightGrams: courierWeight.printWeightGrams,
+        productWeightGrams: courierWeight.productWeightGrams,
+        bindingWeightGrams: courierWeight.bindingWeightGrams,
+        packagingWeightGrams: courierWeight.packingWeightGrams,
+        internalCourierCost,
+        internalDeliveryCost: internalCourierCost,
         total,
         colorPagesCount: rawColorPages,
         bwPagesCount: rawBwPages,
@@ -857,9 +957,9 @@ export const PublicViews = {
       if (laminationEl) laminationEl.innerText = formatCurrency(totalLamination);
 
       const deliveryRow = document.getElementById('row-delivery');
-      if (deliveryRow) deliveryRow.style.display = deliveryFee > 0 ? '' : 'none';
+      if (deliveryRow) deliveryRow.style.display = 'none';
       const deliveryEl = document.getElementById('price-delivery');
-      if (deliveryEl) deliveryEl.innerText = formatCurrency(deliveryFee);
+      if (deliveryEl) deliveryEl.innerText = 'FREE';
 
       const productsRow = document.getElementById('row-products');
       if (productsRow) productsRow.style.display = productsCost > 0 ? '' : 'none';
@@ -875,6 +975,16 @@ export const PublicViews = {
 
       const grandTotalEl = document.getElementById('price-grand-total');
       if (grandTotalEl) grandTotalEl.innerText = formatCurrency(total);
+
+      // Always show the calculated package weight immediately after every
+      // file/product/option change. Do not depend on the delivery zone.
+      const packageWeightEl = document.getElementById('package-weight-display');
+      if (packageWeightEl) {
+        packageWeightEl.innerHTML = courierWeight.totalGrams > 0
+          ? `<strong>${courierWeight.weightKg.toFixed(3)} KG</strong> <span style="font-size:.72rem;color:var(--text-muted);">(${courierWeight.totalGrams} g)</span>`
+          : '0.000 KG';
+        packageWeightEl.title = `Paper ${courierWeight.printWeightGrams}g + Products ${courierWeight.productWeightGrams}g + Binding ${courierWeight.bindingWeightGrams}g + Packing ${courierWeight.packingWeightGrams}g`;
+      }
 
       const qrPayableEl = document.getElementById('qr-payable-amount');
       if (qrPayableEl) qrPayableEl.innerText = formatCurrency(total);
@@ -1615,6 +1725,8 @@ export const PublicViews = {
               icon: p.icon || '🛍️',
               price: Number(p.price) || 0,
               quantity: p.quantity,
+              weightGrams: Number(p.weightGrams) || 0,
+              packagingWeightGrams: Number(p.packagingWeightGrams) || 0,
               subtotal: (Number(p.price) || 0) * p.quantity
             })),
             pricing: quote,
@@ -1635,6 +1747,18 @@ export const PublicViews = {
               sides: state.files[0]?.options?.printSide || 'Single',
               binding: Array.from(new Set(state.files.map(f => f.options?.binding).filter(b => b && b !== 'None'))).join(', ') || 'None',
               lamination: state.files.some(f => f.options?.lamination === 'Yes') ? 'Yes' : 'None'
+            },
+            package: {
+              weightKg: quote.packageWeightKg || 0,
+              weightGrams: quote.packageWeightGrams || 0,
+              printWeightGrams: quote.printWeightGrams || 0,
+              productWeightGrams: quote.productWeightGrams || 0,
+              bindingWeightGrams: quote.bindingWeightGrams || 0,
+              packagingWeightGrams: quote.packagingWeightGrams || 0,
+              courierName: settings.courierPricing?.courierName || 'ST Courier',
+              courierCost: quote.internalCourierCost || 0,
+              customerDeliveryCharge: 0,
+              deliveryType: quote.deliveryType || 'FREE'
             },
             payment: {
               method: 'UPI QR',
