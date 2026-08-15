@@ -635,3 +635,13 @@
     grid-template-columns: 1fr !important;
   }
 }
+
+/* T7 Separate Shop */
+.t7-shop-page .shop-filter-btn.btn-primary { color:#fff; border-color:var(--primary); }
+@media (max-width: 1100px) {
+  .t7-shop-category-grid { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
+}
+@media (max-width: 768px) {
+  .t7-shop-category-grid { grid-template-columns:1fr 1fr !important; }
+  .t7-shop-page h1 { font-size:2rem !important; }
+}

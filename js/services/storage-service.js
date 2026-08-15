@@ -388,6 +388,46 @@ export const StorageService = {
     return this.uploadFileResumable(file, pathFolder.replace(/[^a-zA-Z0-9_-]/g, '_'), onProgress);
   },
 
+  // Permanent catalog image upload (product/service images do not expire)
+  async uploadCatalogImage(file, catalogType = 'products', itemId = 'new') {
+    if (!file) throw new Error('Please select an image.');
+    const type = String(file.type || '').toLowerCase();
+    if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|gif|webp)$/i.test(file.name || '')) {
+      throw new Error('Only JPG, PNG, GIF and WEBP images are allowed.');
+    }
+    if (file.size > 10 * 1024 * 1024) throw new Error('Image must be 10MB or smaller.');
+
+    const idbKey = 'catalog_image_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+    await this.saveToIDB(idbKey, file);
+
+    const safeType = String(catalogType).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeId = String(itemId || 'new').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanName = String(file.name || 'image.webp').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `catalog/${safeType}/${safeId}/${Date.now()}_${cleanName}`;
+
+    const { storage, isDemo } = getServices();
+    if (!isDemo && storage) {
+      try {
+        if (!firebaseStorageModule) {
+          firebaseStorageModule = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js');
+        }
+        const { ref, uploadBytes, getDownloadURL } = firebaseStorageModule;
+        const fileRef = ref(storage, storagePath);
+        await uploadBytes(fileRef, file, {
+          contentType: file.type || 'image/webp',
+          cacheControl: 'public,max-age=31536000'
+        });
+        const url = await getDownloadURL(fileRef);
+        return { url, downloadURL:url, storagePath, name:file.name, idbKey };
+      } catch (e) {
+        console.warn('[CATALOG IMAGE] Firebase upload failed:', e);
+      }
+    }
+
+    const dataUrl = await this.readFileAsDataURL(file);
+    return { url:dataUrl, downloadURL:dataUrl, storagePath:'', name:file.name, idbKey };
+  },
+
   // Delete a file from Firebase Storage by its storagePath
   async deleteFileByPath(storagePath) {
     if (!storagePath || storagePath === '') return false;

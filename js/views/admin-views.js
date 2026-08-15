@@ -13,6 +13,8 @@ import { InvoiceComponent } from '../components/invoice.js';
 import { ModalComponent } from '../components/modal.js';
 import { formatCurrency, getStatusBadgeHTML, formatDate, formatTime } from '../utils/formatters.js';
 import { exportToCSV } from '../utils/export-excel.js';
+import { getServices, initFirebase, firebaseConfig } from '../config/firebase-config.js';
+import { PublicViews } from './public-views.js';
 
 export const AdminViews = {
   // --- ADMIN LOGIN PAGE ---
@@ -100,8 +102,17 @@ export const AdminViews = {
             <a href="#admin-reports" class="sidebar-link ${activeTab === 'reports' ? 'active' : ''}">
               <span class="sidebar-link-icon">📈</span> Reports & Analytics
             </a>
+            <a href="#admin-reports?view=bookings" class="sidebar-link ${activeTab === 'booking-reports' ? 'active' : ''}">
+              <span class="sidebar-link-icon">📅</span> Booking Report
+            </a>
             <a href="#admin-settings" class="sidebar-link ${activeTab === 'settings' ? 'active' : ''}">
               <span class="sidebar-link-icon">⚙️</span> Shop Settings
+            </a>
+            <a href="#admin-about" class="sidebar-link ${activeTab === 'about' ? 'active' : ''}">
+              <span class="sidebar-link-icon">ℹ️</span> About Page Editor
+            </a>
+            <a href="#admin-firebase-diagnostic" class="sidebar-link ${activeTab === 'firebase-diagnostic' ? 'active' : ''}">
+              <span class="sidebar-link-icon">🔥</span> Firebase Diagnostic
             </a>
           </div>
 
@@ -2020,8 +2031,55 @@ Thank you for choosing ${settings.shopName}!
   },
 
   // --- REPORTS & ANALYTICS FULL SYSTEM ---
-  async renderReports() {
+  async renderBookingReport() {
+    const bookings = await DBService.getBookingRequests(true);
+    const html = `
+      <div class="table-card mb-4">
+        <div class="table-toolbar" style="flex-wrap:wrap;gap:1rem;">
+          <div><h3>📅 T7 Shop Booking Report</h3><p class="text-muted" style="font-size:.85rem;">All T7 Shop service, design, sales and driver requests.</p></div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary" id="btn-export-bookings-csv">📊 Export CSV</button>
+            <a class="btn btn-sm btn-outline" href="#admin-reports">📈 Sales Report</a>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;padding:1rem;">
+          <div class="metric-card"><b>${bookings.length}</b><span>Total</span></div>
+          <div class="metric-card"><b>${bookings.filter(b=>b.status==='New').length}</b><span>New</span></div>
+          <div class="metric-card"><b>${bookings.filter(b=>b.status==='Confirmed').length}</b><span>Confirmed</span></div>
+          <div class="metric-card"><b>${bookings.filter(b=>b.status==='Completed').length}</b><span>Completed</span></div>
+        </div>
+        <div class="table-responsive" style="padding:0 1.5rem 1.5rem;">
+          <table class="data-table"><thead><tr><th>Date</th><th>ID</th><th>Type</th><th>Item / Service</th><th>Customer</th><th>Phone</th><th>Preferred</th><th>Driver</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>${bookings.length ? bookings.map(b=>`
+            <tr>
+              <td>${new Date(b.createdAt||Date.now()).toLocaleString('en-IN')}</td>
+              <td><b>${esc(b.id)}</b></td>
+              <td>${esc(b.type==='driver'?'Driver':b.type==='product'?'Sales':'Service')}</td>
+              <td>${esc(b.itemService||'')}</td><td>${esc(b.customerName||'')}</td><td>${esc(b.customerPhone||'')}</td>
+              <td>${esc(b.preferredDate||'—')} ${esc(b.preferredTime||'')}</td>
+              <td>${b.type==='driver'?esc(`${b.driverType||''} | ${b.duration||''} | ${b.pickup||''} → ${b.dropRoute||''}`):'—'}</td>
+              <td><select class="form-select booking-status-select" data-id="${esc(b.id)}">${['New','Contacted','Confirmed','Completed','Cancelled'].map(s=>`<option value="${s}" ${b.status===s?'selected':''}>${s}</option>`).join('')}</select></td>
+              <td><button class="btn btn-sm btn-outline booking-wa-btn" data-phone="${esc(b.customerPhone||'')}">💬 WhatsApp</button></td>
+            </tr>`).join('') : `<tr><td colspan="10" class="text-center text-muted" style="padding:3rem;">No booking requests yet.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>`;
+    await this.renderAdminLayout('booking-reports', html);
+    document.querySelectorAll('.booking-status-select').forEach(el => el.addEventListener('change', async () => {
+      try { await DBService.updateBookingStatus(el.dataset.id, el.value); NotificationService.showToast('Booking status updated.','success'); }
+      catch(e) { NotificationService.showToast('Failed to update booking status.','error'); }
+    }));
+    document.querySelectorAll('.booking-wa-btn').forEach(btn => btn.addEventListener('click', () => {
+      const p=String(btn.dataset.phone||'').replace(/\D/g,''); if(p) window.open(`https://wa.me/${p.length===10?'91'+p:p}`,'_blank','noopener');
+    }));
+    document.getElementById('btn-export-bookings-csv')?.addEventListener('click', () => {
+      exportToCSV('T7_Shop_Booking_Report.csv', bookings.map(b=>({BookingID:b.id,CreatedAt:b.createdAt,Type:b.type,ItemService:b.itemService,Customer:b.customerName,Phone:b.customerPhone,PreferredDate:b.preferredDate,PreferredTime:b.preferredTime,DriverType:b.driverType,Duration:b.duration,Pickup:b.pickup,DropRoute:b.dropRoute,Details:b.details,Status:b.status})));
+    });
+  },
+
+  async renderReports(queryStr = '') {
     const orders = await DBService.getOrders();
+    if (new URLSearchParams(queryStr || '').get('view') === 'bookings') return this.renderBookingReport();
 
     const html = `
       <div class="table-card mb-4">
@@ -2316,6 +2374,135 @@ Thank you for choosing ${settings.shopName}!
     };
   },
 
+  // --- FIREBASE DIAGNOSTIC ---
+  async renderFirebaseDiagnostic() {
+    const run = async () => {
+      const results = [];
+      const started = Date.now();
+      const add = (name, status, detail, ms) => results.push({ name, status, detail, ms });
+
+      // 1. SDK / app initialization
+      try {
+        await initFirebase();
+        const services = getServices();
+        if (!services.db && !services.auth && !services.storage) {
+          add('Firebase SDK / App', 'FAIL', 'Firebase initialized without service handles. Check SDK loading, browser extensions, network and Firebase config.', Date.now()-started);
+        } else {
+          add('Firebase SDK / App', 'PASS', `Project: ${firebaseConfig.projectId}`, Date.now()-started);
+        }
+
+        // Firestore read
+        const t=Date.now();
+        if (!services.db) {
+          add('Firestore', 'FAIL', 'Firestore handle is unavailable because Firebase initialization failed.', Date.now()-t);
+        } else {
+          try {
+            const { doc, getDoc } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
+            const snap = await getDoc(doc(services.db, 'settings', 'general'));
+            add('Firestore', 'PASS', snap.exists() ? 'settings/general is readable.' : 'Connected, but settings/general does not exist.', Date.now()-t);
+          } catch(e) {
+            add('Firestore', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-t);
+          }
+        }
+
+        // Realtime Database read
+        const t2=Date.now();
+        if (!services.firebaseApp) {
+          add('Realtime Database', 'FAIL', 'Firebase app handle unavailable.', Date.now()-t2);
+        } else {
+          try {
+            const { getDatabase, ref, get } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js');
+            const rtdb = getDatabase(services.firebaseApp);
+            await get(ref(rtdb, '__t7_diagnostic__'));
+            add('Realtime Database', 'PASS', 'Read test completed.', Date.now()-t2);
+          } catch(e) {
+            add('Realtime Database', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-t2);
+          }
+        }
+
+        // Storage read/list test
+        const t3=Date.now();
+        if (!services.storage) {
+          add('Firebase Storage', 'FAIL', 'Storage handle is unavailable because Firebase initialization failed.', Date.now()-t3);
+        } else {
+          try {
+            const { ref, listAll } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js');
+            await listAll(ref(services.storage, 'uploads'));
+            add('Firebase Storage', 'PASS', 'Storage bucket is reachable and uploads/ can be listed.', Date.now()-t3);
+          } catch(e) {
+            // list permission failure is still useful diagnostic information.
+            add('Firebase Storage', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-t3);
+          }
+        }
+
+        // Authentication state
+        const t4=Date.now();
+        try {
+          const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
+          const auth = getAuth(services.firebaseApp);
+          add('Firebase Authentication', 'PASS', auth.currentUser ? `Signed in as ${auth.currentUser.email || auth.currentUser.uid}` : 'Firebase Auth is reachable; no Firebase user is signed in.', Date.now()-t4);
+        } catch(e) {
+          add('Firebase Authentication', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-t4);
+        }
+      } catch(e) {
+        add('Firebase SDK / App', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-started);
+      }
+
+      return results;
+    };
+
+    const render = (results = null) => {
+      const escD = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      const passed = results ? results.filter(r=>r.status==='PASS').length : 0;
+      const failed = results ? results.filter(r=>r.status==='FAIL').length : 0;
+      return `
+        <div class="table-card">
+          <div class="table-toolbar" style="align-items:flex-start;gap:1rem;">
+            <div>
+              <h3>🔥 Firebase Diagnostic</h3>
+              <p class="text-muted">Tests the actual Firebase connection used by T7-PrintHub. It does not write test data.</p>
+            </div>
+            <button class="btn btn-primary" id="run-firebase-diagnostic">🔄 Run Diagnostics</button>
+          </div>
+          <div style="padding:1.25rem;">
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem;">
+              <div class="metric-card"><b>${results ? passed : '—'}</b><span>Passed</span></div>
+              <div class="metric-card"><b>${results ? failed : '—'}</b><span>Failed</span></div>
+              <div class="metric-card"><b>${escD(firebaseConfig.projectId)}</b><span>Firebase Project</span></div>
+            </div>
+            ${results ? `
+            <div style="display:grid;gap:.65rem;">
+              ${results.map(r=>`
+                <div style="display:grid;grid-template-columns:220px 90px 1fr 70px;gap:.75rem;align-items:center;padding:1rem;border:1px solid var(--border-color);border-radius:10px;">
+                  <strong>${escD(r.name)}</strong>
+                  <span class="badge ${r.status==='PASS'?'badge-success':'badge-danger'}">${r.status}</span>
+                  <span style="word-break:break-word;">${escD(r.detail)}</span>
+                  <small class="text-muted">${r.ms} ms</small>
+                </div>`).join('')}
+            </div>
+            <div style="margin-top:1rem;padding:1rem;border-radius:10px;background:var(--bg-body);">
+              <b>What to send me:</b>
+              <div class="text-muted" style="margin-top:.35rem;">If anything says FAIL, send me a screenshot of this page. The exact error code/message will identify the problem.</div>
+            </div>` : `
+              <div style="padding:3rem;text-align:center;border:1px dashed var(--border-color);border-radius:12px;">
+                <div style="font-size:3rem;">🔥</div>
+                <h3>Ready to test Firebase</h3>
+                <p class="text-muted">Click Run Diagnostics.</p>
+              </div>`}
+          </div>
+        </div>`;
+    };
+
+    await this.renderAdminLayout('firebase-diagnostic', render());
+    const btn=document.getElementById('run-firebase-diagnostic');
+    if(btn) btn.onclick=async()=>{
+      btn.disabled=true; btn.textContent='⏳ Testing...';
+      const results=await run();
+      await this.renderAdminLayout('firebase-diagnostic', render(results));
+      document.getElementById('run-firebase-diagnostic')?.focus();
+    };
+  },
+
   // --- SHOP SETTINGS ---
   async renderSettings() {
     const settings = await DBService.getSettings();
@@ -2443,10 +2630,470 @@ Thank you for choosing ${settings.shopName}!
     };
   },
 
+  // --- ADMIN ABOUT PAGE EDITOR ---
+  async renderAboutSettings() {
+    const escapeHtml = (val) => String(val ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    let savedData = await DBService.getAboutPage();
+    let workingData = JSON.parse(JSON.stringify(savedData));
+    let pendingCreatorFile = null;
+
+    const renderUI = async () => {
+      const c = workingData.creator || {};
+      const defaultAvatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%233b82f6"><circle cx="50" cy="35" r="22"/><path d="M15,88 C15,65 30,55 50,55 C70,55 85,65 85,88 Z"/></svg>`;
+      const previewImgUrl = c.imageUrl && c.imageUrl.trim() ? c.imageUrl : defaultAvatarSvg;
+
+      const html = `
+        <div class="table-card" style="padding:0;">
+          <div class="table-toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; padding:1.25rem 1.5rem; background:var(--bg-card); border-bottom:1px solid var(--border-color);">
+            <div>
+              <h3 style="margin:0; font-size:1.3rem;">ℹ️ About Page & Creator Profile Editor</h3>
+              <p class="text-muted" style="margin:0.25rem 0 0; font-size:0.83rem;">Manage public About page content, creator profile (Vignesh), services showcase, steps, and contact info.</p>
+            </div>
+            <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm" id="btn-preview-about">👁️ Live Preview</button>
+              <button class="btn btn-outline btn-sm" id="btn-reset-about">🔄 Reset</button>
+              <button class="btn btn-success btn-sm" id="btn-save-about">💾 Save Changes</button>
+            </div>
+          </div>
+
+          <div style="padding:1.5rem; display:flex; flex-direction:column; gap:2rem;">
+
+            <!-- 1. CREATOR EDITOR (VIGNESH PROFILE) -->
+            <div style="background:var(--bg-card); border:1.5px solid var(--primary-light); border-radius:14px; padding:1.5rem; box-shadow:var(--shadow-sm);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem;">
+                <div style="display:flex; align-items:center; gap:0.6rem;">
+                  <span style="font-size:1.5rem;">👨‍💻</span>
+                  <div>
+                    <h4 style="margin:0; font-size:1.1rem; color:var(--primary);">Creator Profile Section ("This App Was Created by Vignesh")</h4>
+                    <span class="text-muted" style="font-size:0.78rem;">Fully customizable creator spotlight displayed on the public About page.</span>
+                  </div>
+                </div>
+                <label style="display:inline-flex; align-items:center; gap:0.5rem; font-weight:700; cursor:pointer; font-size:0.9rem;">
+                  <input type="checkbox" id="abt-creator-enabled" ${c.enabled !== false ? 'checked' : ''}>
+                  Show Creator Section on About Page
+                </label>
+              </div>
+
+              <!-- Creator Photo Uploader -->
+              <div style="display:grid; grid-template-columns:140px 1fr; gap:1.5rem; align-items:center; background:var(--primary-light); padding:1.25rem; border-radius:12px; margin-bottom:1.25rem; border:1px solid var(--border-color);">
+                <div style="text-align:center;">
+                  <div style="width:110px; height:110px; border-radius:50%; overflow:hidden; border:3px solid var(--primary); background:white; margin:0 auto; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow-md);">
+                    <img id="abt-creator-img-preview" src="${previewImgUrl}" alt="Creator Photo" style="width:100%; height:100%; object-fit:cover;" onerror="this.onerror=null;this.src='${defaultAvatarSvg}';" />
+                  </div>
+                  <span style="font-size:0.72rem; color:var(--text-muted); margin-top:0.35rem; display:block;">Creator Photo</span>
+                </div>
+
+                <div>
+                  <h5 style="margin:0 0 0.35rem; font-size:0.95rem;">Creator Image / Photo Uploader</h5>
+                  <p class="text-muted" style="font-size:0.8rem; margin:0 0 0.85rem;">Upload JPG, JPEG, PNG, or WEBP image (max 5MB). Recommended: 500×500 square photo.</p>
+                  <div style="display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;">
+                    <input type="file" id="abt-creator-file-input" accept="image/jpeg,image/png,image/webp,image/jpg" style="display:none;">
+                    <button type="button" class="btn btn-sm btn-primary" id="btn-trigger-creator-photo">📁 Choose Photo</button>
+                    <button type="button" class="btn btn-sm btn-danger" id="abt-creator-img-remove">🗑️ Remove Photo</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Creator Text Details -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" style="font-weight:700;">Creator Name *</label>
+                  <input type="text" class="form-control" id="abt-creator-name" value="${escapeHtml(c.name || 'Vignesh')}">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" style="font-weight:700;">Creator Heading / Title *</label>
+                  <input type="text" class="form-control" id="abt-creator-heading" value="${escapeHtml(c.heading || 'This App Was Created by Vignesh')}">
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Role / Tagline</label>
+                  <input type="text" class="form-control" id="abt-creator-role" value="${escapeHtml(c.role || 'Developer & Creator')}">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Creator Contact Phone</label>
+                  <input type="text" class="form-control" id="abt-creator-phone" value="${escapeHtml(c.phone || '9360039283')}">
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Call Button Label</label>
+                  <input type="text" class="form-control" id="abt-creator-call-text" value="${escapeHtml(c.callBtnText || `📞 Contact ${c.name || 'Vignesh'} — ${c.phone || '9360039283'}`)}">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">WhatsApp Button Label</label>
+                  <input type="text" class="form-control" id="abt-creator-wa-text" value="${escapeHtml(c.whatsappBtnText || '💬 WhatsApp Vignesh')}">
+                </div>
+              </div>
+
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Creator Biography / Description</label>
+                <textarea class="form-control" id="abt-creator-desc" rows="3">${escapeHtml(c.description || '')}</textarea>
+              </div>
+            </div>
+
+            <!-- 2. GENERAL PAGE CONTENT -->
+            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:1.5rem;">
+              <h4 style="margin:0 0 1rem; font-size:1.1rem;">📝 Page Title & Main Description</h4>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">About Page Badge / Title</label>
+                  <input type="text" class="form-control" id="abt-title" value="${escapeHtml(workingData.title || 'T7 Print Hub')}">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Subheading</label>
+                  <input type="text" class="form-control" id="abt-subtitle" value="${escapeHtml(workingData.subtitle || '')}">
+                </div>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Main Application Description</label>
+                <textarea class="form-control" id="abt-desc" rows="3">${escapeHtml(workingData.description || '')}</textarea>
+              </div>
+            </div>
+
+            <!-- 3. SERVICES SHOWCASE MANAGER -->
+            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:1.5rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h4 style="margin:0; font-size:1.1rem;">🛠️ About Page Services Showcase (${(workingData.services || []).length} items)</h4>
+                <button type="button" class="btn btn-sm btn-primary" id="abt-add-service-btn">➕ Add Service</button>
+              </div>
+              <div id="abt-services-list" style="display:flex; flex-direction:column; gap:0.75rem;">
+                ${(workingData.services || []).map((srv, idx) => `
+                  <div style="display:grid; grid-template-columns:36px 40px minmax(0,1fr) minmax(0,2fr) auto auto; gap:0.75rem; align-items:center; padding:0.75rem; background:var(--primary-light); border:1px solid var(--border-color); border-radius:10px;">
+                    <span style="font-weight:800; color:var(--text-muted); text-align:center;">#${idx + 1}</span>
+                    <input type="text" class="form-control form-control-sm srv-icon" data-idx="${idx}" value="${escapeHtml(srv.icon || '📄')}" style="text-align:center;">
+                    <input type="text" class="form-control form-control-sm srv-title" data-idx="${idx}" value="${escapeHtml(srv.title || '')}" placeholder="Service Title">
+                    <input type="text" class="form-control form-control-sm srv-desc" data-idx="${idx}" value="${escapeHtml(srv.description || '')}" placeholder="Short Description">
+                    <label style="margin:0; font-size:0.78rem; font-weight:700; cursor:pointer;">
+                      <input type="checkbox" class="srv-enabled" data-idx="${idx}" ${srv.enabled !== false ? 'checked' : ''}> Show
+                    </label>
+                    <div style="display:flex; gap:0.3rem;">
+                      <button type="button" class="btn btn-sm btn-secondary srv-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>▲</button>
+                      <button type="button" class="btn btn-sm btn-secondary srv-down" data-idx="${idx}" ${idx === workingData.services.length - 1 ? 'disabled' : ''}>▼</button>
+                      <button type="button" class="btn btn-sm btn-danger srv-del" data-idx="${idx}">✕</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+
+            <!-- 4. HOW IT WORKS STEPS MANAGER -->
+            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:1.5rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h4 style="margin:0; font-size:1.1rem;">📌 How It Works Steps (${(workingData.steps || []).length} steps)</h4>
+                <button type="button" class="btn btn-sm btn-primary" id="abt-add-step-btn">➕ Add Step</button>
+              </div>
+              <div id="abt-steps-list" style="display:flex; flex-direction:column; gap:0.75rem;">
+                ${(workingData.steps || []).map((step, idx) => `
+                  <div style="display:grid; grid-template-columns:50px minmax(0,1fr) minmax(0,2fr) auto auto; gap:0.75rem; align-items:center; padding:0.75rem; background:var(--primary-light); border:1px solid var(--border-color); border-radius:10px;">
+                    <span style="font-weight:800; color:var(--primary); text-align:center;">Step ${idx + 1}</span>
+                    <input type="text" class="form-control form-control-sm step-title" data-idx="${idx}" value="${escapeHtml(step.title || '')}" placeholder="Step Title">
+                    <input type="text" class="form-control form-control-sm step-desc" data-idx="${idx}" value="${escapeHtml(step.description || '')}" placeholder="Step Description">
+                    <label style="margin:0; font-size:0.78rem; font-weight:700; cursor:pointer;">
+                      <input type="checkbox" class="step-enabled" data-idx="${idx}" ${step.enabled !== false ? 'checked' : ''}> Show
+                    </label>
+                    <div style="display:flex; gap:0.3rem;">
+                      <button type="button" class="btn btn-sm btn-secondary step-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>▲</button>
+                      <button type="button" class="btn btn-sm btn-secondary step-down" data-idx="${idx}" ${idx === workingData.steps.length - 1 ? 'disabled' : ''}>▼</button>
+                      <button type="button" class="btn btn-sm btn-danger step-del" data-idx="${idx}">✕</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+
+            <!-- 5. CONTACT & SOCIAL LINKS -->
+            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:1.5rem;">
+              <h4 style="margin:0 0 1rem; font-size:1.1rem;">📞 Contact & Social Media Links</h4>
+              <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Phone</label>
+                  <input type="text" class="form-control" id="abt-cnt-phone" value="${escapeHtml(workingData.contact?.phone || '')}">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">WhatsApp</label>
+                  <input type="text" class="form-control" id="abt-cnt-wa" value="${escapeHtml(workingData.contact?.whatsapp || '')}">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Email</label>
+                  <input type="email" class="form-control" id="abt-cnt-email" value="${escapeHtml(workingData.contact?.email || '')}">
+                </div>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem;">
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Facebook URL</label>
+                  <input type="url" class="form-control" id="abt-soc-fb" value="${escapeHtml(workingData.socialLinks?.facebook || '')}">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Instagram URL</label>
+                  <input type="url" class="form-control" id="abt-soc-ig" value="${escapeHtml(workingData.socialLinks?.instagram || '')}">
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      `;
+
+      await this.renderAdminLayout('about', html);
+      attachEvents();
+    };
+
+    const readFormValues = () => {
+      const getVal = (id) => document.getElementById(id)?.value?.trim() || '';
+
+      workingData.title = getVal('abt-title');
+      workingData.subtitle = getVal('abt-subtitle');
+      workingData.description = getVal('abt-desc');
+
+      workingData.creator = {
+        ...(workingData.creator || {}),
+        enabled: !!document.getElementById('abt-creator-enabled')?.checked,
+        name: getVal('abt-creator-name'),
+        heading: getVal('abt-creator-heading'),
+        role: getVal('abt-creator-role'),
+        phone: getVal('abt-creator-phone'),
+        callBtnText: getVal('abt-creator-call-text'),
+        whatsappBtnText: getVal('abt-creator-wa-text'),
+        description: getVal('abt-creator-desc')
+      };
+
+      document.querySelectorAll('.srv-title').forEach(input => {
+        const idx = Number(input.dataset.idx);
+        if (workingData.services[idx]) {
+          workingData.services[idx].title = input.value.trim();
+          workingData.services[idx].icon = document.querySelector(`.srv-icon[data-idx="${idx}"]`)?.value?.trim() || '📄';
+          workingData.services[idx].description = document.querySelector(`.srv-desc[data-idx="${idx}"]`)?.value?.trim() || '';
+          workingData.services[idx].enabled = !!document.querySelector(`.srv-enabled[data-idx="${idx}"]`)?.checked;
+        }
+      });
+
+      document.querySelectorAll('.step-title').forEach(input => {
+        const idx = Number(input.dataset.idx);
+        if (workingData.steps[idx]) {
+          workingData.steps[idx].title = input.value.trim();
+          workingData.steps[idx].description = document.querySelector(`.step-desc[data-idx="${idx}"]`)?.value?.trim() || '';
+          workingData.steps[idx].enabled = !!document.querySelector(`.step-enabled[data-idx="${idx}"]`)?.checked;
+        }
+      });
+
+      workingData.contact = {
+        ...(workingData.contact || {}),
+        phone: getVal('abt-cnt-phone'),
+        whatsapp: getVal('abt-cnt-wa'),
+        email: getVal('abt-cnt-email')
+      };
+
+      workingData.socialLinks = {
+        ...(workingData.socialLinks || {}),
+        facebook: getVal('abt-soc-fb'),
+        instagram: getVal('abt-soc-ig')
+      };
+    };
+
+    const attachEvents = () => {
+      document.getElementById('btn-trigger-creator-photo')?.addEventListener('click', () => {
+        document.getElementById('abt-creator-file-input')?.click();
+      });
+
+      document.getElementById('abt-creator-file-input')?.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const type = String(file.type || '').toLowerCase();
+        if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(file.name || '')) {
+          NotificationService.showToast('Please select a valid JPG, PNG, or WEBP image file.', 'warning');
+          return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          NotificationService.showToast('Image file size must be 5MB or smaller.', 'warning');
+          return;
+        }
+
+        try {
+          const previewUrl = await StorageService.readFileAsDataURL(file);
+          const imgEl = document.getElementById('abt-creator-img-preview');
+          if (imgEl) imgEl.src = previewUrl;
+          pendingCreatorFile = file;
+          NotificationService.showToast('Photo selected! Click "Save Changes" to save photo.', 'info');
+        } catch (err) {
+          console.error('[ABOUT] Preview failed:', err);
+          NotificationService.showToast('Failed to preview image file.', 'error');
+        }
+      });
+
+      document.getElementById('abt-creator-img-remove')?.addEventListener('click', () => {
+        pendingCreatorFile = null;
+        workingData.creator.imageUrl = '';
+        const defaultAvatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%233b82f6"><circle cx="50" cy="35" r="22"/><path d="M15,88 C15,65 30,55 50,55 C70,55 85,65 85,88 Z"/></svg>`;
+        const imgEl = document.getElementById('abt-creator-img-preview');
+        if (imgEl) imgEl.src = defaultAvatarSvg;
+        NotificationService.showToast('Photo removed. Default avatar will be displayed on save.', 'info');
+      });
+
+      document.getElementById('abt-add-service-btn')?.addEventListener('click', () => {
+        readFormValues();
+        workingData.services.push({
+          id: 'srv-' + Date.now(),
+          icon: '📄',
+          title: 'New Printing Service',
+          description: 'Service description details...',
+          enabled: true,
+          imageUrl: ''
+        });
+        renderUI();
+      });
+
+      document.querySelectorAll('.srv-del').forEach(btn => {
+        btn.onclick = () => {
+          readFormValues();
+          const idx = Number(btn.dataset.idx);
+          workingData.services.splice(idx, 1);
+          renderUI();
+        };
+      });
+
+      document.querySelectorAll('.srv-up').forEach(btn => {
+        btn.onclick = () => {
+          readFormValues();
+          const idx = Number(btn.dataset.idx);
+          if (idx > 0) {
+            const temp = workingData.services[idx];
+            workingData.services[idx] = workingData.services[idx - 1];
+            workingData.services[idx - 1] = temp;
+            renderUI();
+          }
+        };
+      });
+
+      document.querySelectorAll('.srv-down').forEach(btn => {
+        btn.onclick = () => {
+          readFormValues();
+          const idx = Number(btn.dataset.idx);
+          if (idx < workingData.services.length - 1) {
+            const temp = workingData.services[idx];
+            workingData.services[idx] = workingData.services[idx + 1];
+            workingData.services[idx + 1] = temp;
+            renderUI();
+          }
+        };
+      });
+
+      document.getElementById('abt-add-step-btn')?.addEventListener('click', () => {
+        readFormValues();
+        workingData.steps.push({
+          number: workingData.steps.length + 1,
+          title: 'New Step',
+          description: 'Step description details...',
+          enabled: true
+        });
+        renderUI();
+      });
+
+      document.querySelectorAll('.step-del').forEach(btn => {
+        btn.onclick = () => {
+          readFormValues();
+          const idx = Number(btn.dataset.idx);
+          workingData.steps.splice(idx, 1);
+          workingData.steps.forEach((s, i) => s.number = i + 1);
+          renderUI();
+        };
+      });
+
+      document.querySelectorAll('.step-up').forEach(btn => {
+        btn.onclick = () => {
+          readFormValues();
+          const idx = Number(btn.dataset.idx);
+          if (idx > 0) {
+            const temp = workingData.steps[idx];
+            workingData.steps[idx] = workingData.steps[idx - 1];
+            workingData.steps[idx - 1] = temp;
+            workingData.steps.forEach((s, i) => s.number = i + 1);
+            renderUI();
+          }
+        };
+      });
+
+      document.querySelectorAll('.step-down').forEach(btn => {
+        btn.onclick = () => {
+          readFormValues();
+          const idx = Number(btn.dataset.idx);
+          if (idx < workingData.steps.length - 1) {
+            const temp = workingData.steps[idx];
+            workingData.steps[idx] = workingData.steps[idx + 1];
+            workingData.steps[idx + 1] = temp;
+            workingData.steps.forEach((s, i) => s.number = i + 1);
+            renderUI();
+          }
+        };
+      });
+
+      document.getElementById('btn-reset-about')?.addEventListener('click', async () => {
+        workingData = JSON.parse(JSON.stringify(savedData));
+        pendingCreatorFile = null;
+        await renderUI();
+        NotificationService.showToast('Reset to saved About settings.', 'info');
+      });
+
+      document.getElementById('btn-preview-about')?.addEventListener('click', () => {
+        readFormValues();
+        const modal = ModalComponent || window.ModalComponent;
+        if (modal?.show && PublicViews?.renderAboutHTML) {
+          modal.show({
+            title: '👁️ Live Customer About Page Preview',
+            bodyHTML: PublicViews.renderAboutHTML(workingData),
+            width: '960px'
+          });
+        }
+      });
+
+      document.getElementById('btn-save-about')?.addEventListener('click', async () => {
+        readFormValues();
+        const btn = document.getElementById('btn-save-about');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Saving...';
+
+        try {
+          if (pendingCreatorFile) {
+            try {
+              const uploaded = await StorageService.uploadCatalogImage(pendingCreatorFile, 'about', 'creator');
+              workingData.creator.imageUrl = uploaded.url || uploaded.downloadURL || uploaded.dataUrl || '';
+            } catch (imgErr) {
+              console.warn('[ABOUT] Storage upload warning, fallback to dataUrl:', imgErr);
+              const dataUrl = await StorageService.readFileAsDataURL(pendingCreatorFile);
+              workingData.creator.imageUrl = dataUrl || '';
+            }
+          }
+
+          savedData = await DBService.saveAboutPage(workingData);
+          pendingCreatorFile = null;
+          NotificationService.showToast('About page updated successfully', 'success');
+          await renderUI();
+        } catch (err) {
+          console.error('[ABOUT] Save failed:', err);
+          NotificationService.showToast('Failed to update About page: ' + (err?.message || 'Firebase error'), 'error');
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+          }
+        }
+      });
+    };
+
+    await renderUI();
+  },
+
   // --- CATALOG MANAGER: PRINTING SERVICES + STATIONERY PRODUCTS ---
   async renderCatalog() {
     const catalog = await DBService.getServicesCatalog();
     const products = await DBService.getProductsCatalog();
+    const shopSettings = DBService.getSettingsSync();
+    const productCategories = Array.isArray(shopSettings.shopProductCategories) && shopSettings.shopProductCategories.length
+      ? shopSettings.shopProductCategories
+      : ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
 
     const hashQuery = (window.location.hash.split('?')[1] || '');
     const activeTab = new URLSearchParams(hashQuery).get('tab') === 'stationery'
@@ -2499,7 +3146,11 @@ Thank you for choosing ${settings.shopName}!
       </tr>
     ` : products.map(p => `
       <tr>
-        <td style="font-size:1.5rem;text-align:center;">${esc(p.icon || '📦')}</td>
+        <td style="text-align:center;">
+          ${p.imageUrl
+            ? `<img src="${esc(p.imageUrl)}" alt="${esc(p.name || 'Product')}" loading="lazy" style="width:58px;height:58px;object-fit:cover;border-radius:8px;border:1px solid var(--border-color);">`
+            : `<span style="font-size:1.5rem;">${esc(p.icon || '📦')}</span>`}
+        </td>
         <td>
           <b>${esc(p.name || 'Unnamed Product')}</b>
           <div style="font-size:.75rem;color:var(--text-muted);">ID: ${esc(p.id)}</div>
@@ -2544,9 +3195,14 @@ Thank you for choosing ${settings.shopName}!
               ✏️ Stationery & Shop Products
             </button>
           </div>
-          ${activeTab === 'stationery'
-            ? '<button class="btn btn-success" onclick="window.openProductModal()">➕ Add Product</button>'
-            : '<button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add Service</button>'}
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+            ${activeTab === 'stationery'
+              ? '<button class="btn btn-success" onclick="window.openProductModal()">➕ Add Product</button>'
+              : '<button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add Service</button>'}
+            <button class="btn btn-primary" onclick="window.openProductModal(null, true)">🛍️ Add T7 Shop Product</button>
+            <button class="btn btn-primary" onclick="window.openCatalogModal(null, true)">🛍️ Add T7 Shop Service</button>
+            <button class="btn btn-outline" onclick="window.openT7ProductCategories()">⚙️ Product Categories</button>
+          </div>
         </div>
 
         <div style="padding:1rem 1.25rem;">
@@ -2585,12 +3241,75 @@ Thank you for choosing ${settings.shopName}!
       window.location.hash = `#admin-catalog?tab=${tab === 'stationery' ? 'stationery' : 'printing'}`;
     };
 
-    window.openProductModal = async (productId = null) => {
+    window.openT7ProductCategories = async () => {
+      const settings = DBService.getSettingsSync();
+      let categories = Array.isArray(settings.shopProductCategories) && settings.shopProductCategories.length
+        ? [...settings.shopProductCategories]
+        : ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
+
+      const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+      const render = () => `
+        <div style="padding:.25rem;">
+          <div style="display:flex;gap:.5rem;margin-bottom:1rem;">
+            <input class="form-control" id="new-t7-category" placeholder="Enter new product category" maxlength="60">
+            <button class="btn btn-success" type="button" onclick="window.addT7ProductCategory()">➕ Add</button>
+          </div>
+          <div id="t7-category-list">
+            ${categories.map((c,i) => `
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.75rem;border:1px solid var(--border-color);border-radius:9px;margin-bottom:.5rem;">
+                <span><b>${escHtml(c)}</b></span>
+                <button class="btn btn-sm btn-danger" type="button" onclick="window.removeT7ProductCategory(${i})">🗑️ Delete</button>
+              </div>`).join('')}
+          </div>
+          <small class="text-muted">Categories are saved in Firebase settings and will appear in the product editor.</small>
+        </div>`;
+
+      window._t7ProductCategories = categories;
+
+      window.addT7ProductCategory = async () => {
+        const input = document.getElementById('new-t7-category');
+        const value = String(input?.value || '').trim();
+        if (!value) return NotificationService.showToast('Enter a category name.', 'warning');
+        const list = window._t7ProductCategories || [];
+        if (list.some(c => c.toLowerCase() === value.toLowerCase())) {
+          return NotificationService.showToast('That category already exists.', 'warning');
+        }
+        list.push(value);
+        window._t7ProductCategories = list;
+        await DBService.saveSettings({ shopProductCategories: list });
+        NotificationService.showToast('Product category added.', 'success');
+        await window.openT7ProductCategories();
+      };
+
+      window.removeT7ProductCategory = async (index) => {
+        const list = [...(window._t7ProductCategories || [])];
+        if (!list[index]) return;
+        const used = (await DBService.getProductsCatalog()).some(p => String(p.category || '').toLowerCase() === String(list[index]).toLowerCase());
+        if (used && !confirm(`"${list[index]}" is used by a product. Delete the category anyway? Existing products will keep their current category.`)) return;
+        list.splice(index, 1);
+        window._t7ProductCategories = list;
+        await DBService.saveSettings({ shopProductCategories: list });
+        NotificationService.showToast('Product category deleted.', 'info');
+        await window.openT7ProductCategories();
+      };
+
+      await ModalComponent.open({
+        title: '⚙️ T7 Shop Product Categories',
+        bodyHTML: render(),
+        width: '600px'
+      });
+    };
+
+    window.openProductModal = async (productId = null, shopMode = false) => {
       try {
         const allItems = await DBService.getProductsCatalog();
         const existing = productId ? allItems.find(item => item.id === productId) : null;
 
-        const categories = ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
+        const shopSettings = DBService.getSettingsSync();
+        const categories = Array.isArray(shopSettings.shopProductCategories) && shopSettings.shopProductCategories.length
+          ? shopSettings.shopProductCategories
+          : ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
         const modalHTML = `
           <form id="product-form" onsubmit="event.preventDefault(); window.saveProductForm('${esc(productId || '')}');">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -2635,6 +3354,33 @@ Thank you for choosing ${settings.shopName}!
             <div class="form-group">
               <label class="form-label">Description *</label>
               <textarea class="form-control" id="prod-desc" rows="3" required>${esc(existing?.description || '')}</textarea>
+            </div> 
+            <div class="form-group" style="padding:1rem;border:1px solid var(--border-color);border-radius:10px;">
+              <label class="form-label">🖼️ Product Image</label>
+              <input type="file" class="form-control" id="prod-image" accept="image/jpeg,image/png,image/gif,image/webp">
+              ${existing?.imageUrl ? `<div style="margin-top:.75rem;"><img src="${esc(existing.imageUrl)}" alt="Product" style="width:120px;height:90px;object-fit:cover;border-radius:10px;"></div>` : ''}
+              <small class="text-muted">JPG, PNG, GIF or WEBP • maximum 10MB</small>
+            </div> 
+            <div class="form-group">
+              <label style="display:flex;align-items:center;gap:.55rem;font-weight:700;">
+                <input type="checkbox" id="prod-t7-shop" ${existing?.t7ShopEnabled || shopMode ? 'checked' : ''} style="width:18px;height:18px;">
+                🛍️ Show this product in T7 Shop
+              </label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;padding:1rem;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-body);">
+              <div class="form-group"><label class="form-label">T7 Shop Category</label>
+                <select class="form-select" id="prod-t7-category">
+                  <option value="computers" ${existing?.t7ShopCategory==='computers' ? 'selected' : ''}>💻 Laptop & PC Sales</option>
+                  <option value="amd" ${existing?.t7ShopCategory==='amd' ? 'selected' : ''}>🧩 AMD & PC Accessories</option>
+                  <option value="design" ${existing?.t7ShopCategory==='design' ? 'selected' : ''}>🎨 Design & Printing</option>
+                </select>
+              </div>
+              <div class="form-group"><label class="form-label">Customer Action</label>
+                <select class="form-select" id="prod-t7-action">
+                  <option value="enquiry" ${existing?.t7ShopAction!=='service' ? 'selected' : ''}>Buy / Enquire</option>
+                  <option value="service" ${existing?.t7ShopAction==='service' ? 'selected' : ''}>Book / Enquire</option>
+                </select>
+              </div>
             </div>
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -2678,8 +3424,24 @@ Thank you for choosing ${settings.shopName}!
       const description = document.getElementById('prod-desc')?.value.trim();
       const status = document.getElementById('prod-status')?.value || 'Active';
       const popular = !!document.getElementById('prod-popular')?.checked;
+       const t7ShopEnabled = !!document.getElementById('prod-t7-shop')?.checked;
+       const t7ShopCategory = document.getElementById('prod-t7-category')?.value || 'computers';
+       const t7ShopAction = document.getElementById('prod-t7-action')?.value || 'enquiry';
 
-      if (!name || !description || !Number.isFinite(price) || price < 0 || !Number.isFinite(weightGrams) || weightGrams < 0 || !Number.isFinite(packagingWeightGrams) || packagingWeightGrams < 0) {
+      let imageUrl = '';
+       let imageStoragePath = '';
+       const existingProducts = await DBService.getProductsCatalog();
+       const existingProduct = productId ? existingProducts.find(p => p.id === productId) : null;
+       imageUrl = existingProduct?.imageUrl || '';
+       imageStoragePath = existingProduct?.imageStoragePath || '';
+       const imageFile = document.getElementById('prod-image')?.files?.[0] || null;
+       if (imageFile) {
+         const upload = await StorageService.uploadCatalogImage(imageFile, 'products', productId || ('prod-' + Date.now()));
+         imageUrl = upload.url || upload.downloadURL || imageUrl;
+         imageStoragePath = upload.storagePath || imageStoragePath;
+       }
+
+       if (!name || !description || !Number.isFinite(price) || price < 0 || !Number.isFinite(weightGrams) || weightGrams < 0 || !Number.isFinite(packagingWeightGrams) || packagingWeightGrams < 0) {
         NotificationService.showToast('Please enter a valid product name, description and price.', 'warning');
         return;
       }
@@ -2687,7 +3449,8 @@ Thank you for choosing ${settings.shopName}!
       try {
         await DBService.saveProductItem({
           ...(productId ? { id: productId } : {}),
-          name, category, price, weightGrams, packagingWeightGrams, icon, stockStatus, description, status, popular
+          name, category, price, weightGrams, packagingWeightGrams, icon, stockStatus, description, status, popular,
+           t7ShopEnabled, t7ShopCategory, t7ShopAction, imageUrl, imageStoragePath
         });
 
         window.ModalComponent?.close();
@@ -2713,7 +3476,7 @@ Thank you for choosing ${settings.shopName}!
       }
     };
 
-    window.openCatalogModal = async (serviceId = null) => {
+    window.openCatalogModal = async (serviceId = null, shopMode = false) => {
       const allItems = await DBService.getServicesCatalog();
       const existing = serviceId ? allItems.find(item => item.id === serviceId) : null;
 
@@ -2752,7 +3515,28 @@ Thank you for choosing ${settings.shopName}!
           <div class="form-group">
             <label class="form-label">Description *</label>
             <textarea class="form-control" id="cat-desc" rows="3" required>${esc(existing?.description || '')}</textarea>
-          </div>
+          </div> 
+           <div class="form-group">
+             <label style="display:flex;align-items:center;gap:.55rem;font-weight:700;">
+               <input type="checkbox" id="cat-t7-shop" ${existing?.t7ShopEnabled || shopMode ? 'checked' : ''} style="width:18px;height:18px;">
+               🛍️ Show this service in T7 Shop
+             </label>
+           </div>
+           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;padding:1rem;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-body);">
+             <div class="form-group"><label class="form-label">T7 Shop Category</label>
+               <select class="form-select" id="cat-t7-category">
+                 <option value="design" ${existing?.t7ShopCategory==='design' ? 'selected' : ''}>🎨 Design & Printing</option>
+                 <option value="services" ${existing?.t7ShopCategory==='services' ? 'selected' : ''}>🛠️ Computer Services</option>
+                 <option value="driver" ${existing?.t7ShopCategory==='driver' ? 'selected' : ''}>🚗 Driver Booking</option>
+               </select>
+             </div>
+             <div class="form-group"><label class="form-label">Customer Action</label>
+               <select class="form-select" id="cat-t7-action">
+                 <option value="service" ${existing?.t7ShopAction!=='driver' ? 'selected' : ''}>Book / Enquire</option>
+                 <option value="driver" ${existing?.t7ShopAction==='driver' ? 'selected' : ''}>Driver Booking</option>
+               </select>
+             </div>
+           </div>
 
           <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;">
             <input type="checkbox" id="cat-popular" ${existing?.popular ? 'checked' : ''} style="width:18px;height:18px;">
@@ -2786,6 +3570,9 @@ Thank you for choosing ${settings.shopName}!
       const status = document.getElementById('cat-status')?.value || 'Active';
       const description = document.getElementById('cat-desc')?.value.trim();
       const popular = !!document.getElementById('cat-popular')?.checked;
+       const t7ShopEnabled = !!document.getElementById('cat-t7-shop')?.checked;
+       const t7ShopCategory = document.getElementById('cat-t7-category')?.value || 'design';
+       const t7ShopAction = document.getElementById('cat-t7-action')?.value || 'service';
 
       if (!title || !startingPrice || !description) {
         NotificationService.showToast('Please fill out all required service fields.', 'warning');
@@ -2795,7 +3582,8 @@ Thank you for choosing ${settings.shopName}!
       try {
         await DBService.saveCatalogItem({
           ...(serviceId ? { id: serviceId } : {}),
-          title, category, startingPrice, icon, status, description, popular
+          title, category, startingPrice, icon, status, description, popular,
+           t7ShopEnabled, t7ShopCategory, t7ShopAction
         });
 
         window.ModalComponent?.close();

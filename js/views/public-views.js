@@ -2,7 +2,8 @@
    TEAM 7 SYSTEM SOLUTION - PUBLIC VIEWS MODULE
    ========================================================================== */
 
-import { DEFAULT_SERVICES, FAQS } from '../config/default-data.js';
+import { DEFAULT_SERVICES, FAQS, DEFAULT_ABOUT_PAGE } from '../config/default-data.js';
+import { T7_SHOP_CATEGORIES, T7_SHOP_ITEMS } from '../config/shop-data.js';
 import { AuthService } from '../services/auth-service.js';
 import { DBService } from '../services/db-service.js';
 import { PricingEngine } from '../services/pricing-engine.js';
@@ -36,7 +37,9 @@ function renderStationeryShowcase(products, settings, compact = false) {
             return `
               <div class="service-card" style="position:relative;">
                 ${p.popular ? '<span class="badge badge-approved" style="position:absolute;top:1rem;right:1rem;font-size:0.7rem;">Popular</span>' : ''}
-                <div class="service-icon">${p.icon || '📦'}</div>
+                ${p.imageUrl
+                  ? `<div style="height:190px;margin:-.25rem -.25rem 1rem;overflow:hidden;border-radius:10px;background:var(--bg-body);"><img src="${p.imageUrl}" alt="${p.name || 'Product'}" loading="lazy" style="width:100%;height:100%;object-fit:cover;"></div>`
+                  : `<div class="service-icon">${p.icon || '📦'}</div>`}
                 <div style="margin-bottom:0.4rem;"><span class="badge badge-waiting" style="font-size:0.7rem;">${p.category || 'Accessory'}</span></div>
                 <h3 style="margin-bottom:0.5rem;font-size:1.2rem;">${p.name}</h3>
                 <p class="text-muted" style="font-size:0.88rem;flex:1;margin-bottom:1rem;">${p.description || ''}</p>
@@ -89,7 +92,18 @@ export const PublicViews = {
     // Always load the Firestore-backed catalog before rendering.
     // This prevents the Home page from briefly/incorrectly using DEFAULT_SERVICES
     // after a fresh page refresh.
-    const catalog = await DBService.getServicesCatalog();
+    // Never block the Home page waiting indefinitely for Firebase.
+    // If Firestore is slow/offline, render immediately with the built-in defaults.
+    let catalog = [];
+    try {
+      catalog = await Promise.race([
+        DBService.getServicesCatalog(),
+        new Promise(resolve => setTimeout(() => resolve([]), 4000))
+      ]);
+    } catch (e) {
+      console.warn('[HOME] Catalog unavailable; using defaults:', e);
+      catalog = [];
+    }
     const activeServices = (catalog || []).filter(s => s.status !== 'Inactive');
     const displayServices = activeServices.length > 0 ? activeServices : DEFAULT_SERVICES;
     const products = DBService.getProductsCatalogSync();
@@ -346,8 +360,16 @@ export const PublicViews = {
   // --- SERVICES PAGE ---
   async renderServices() {
     // Load the latest Firestore-backed catalog before rendering the Services page.
-    const catalog = await DBService.getServicesCatalog();
-    const activeServices = catalog.filter(s => s.status !== 'Inactive');
+    let catalog = [];
+    try {
+      catalog = await Promise.race([
+        DBService.getServicesCatalog(),
+        new Promise(resolve => setTimeout(() => resolve(DBService.getServicesCatalogSync()), 1000))
+      ]);
+    } catch (e) {
+      catalog = DBService.getServicesCatalogSync();
+    }
+    const activeServices = (catalog || []).filter(s => s.status !== 'Inactive');
     const products = DBService.getProductsCatalogSync();
     const isAdmin = AuthService.isAdmin();
 
@@ -467,7 +489,10 @@ export const PublicViews = {
     // Only active + in-stock products are offered as optional order add-ons.
     let orderProducts = [];
     try {
-      const catalog = await DBService.getProductsCatalog();
+      const catalog = await Promise.race([
+        DBService.getProductsCatalog(),
+        new Promise(resolve => setTimeout(() => resolve(DBService.getProductsCatalogSync()), 1000))
+      ]);
       orderProducts = (catalog || []).filter(p => p && String(p.status || 'Active').toLowerCase() === 'active' && String(p.stockStatus || 'In Stock').toLowerCase() === 'in stock');
     } catch (err) {
       console.warn('Optional product catalog could not be loaded:', err);
@@ -2040,7 +2065,15 @@ export const PublicViews = {
     const app = document.getElementById('app-content');
     const params = new URLSearchParams(queryStr);
     const serviceId = params.get('serviceId') || '';
-    const catalog = await DBService.getServicesCatalog();
+    let catalog = [];
+    try {
+      catalog = await Promise.race([
+        DBService.getServicesCatalog(),
+        new Promise(resolve => setTimeout(() => resolve(DBService.getServicesCatalogSync()), 1000))
+      ]);
+    } catch (e) {
+      catalog = DBService.getServicesCatalogSync();
+    }
     const service = (catalog || []).find(s => String(s.id) === serviceId) || null;
 
     if (!service || service.status === 'Inactive') {
@@ -2225,6 +2258,229 @@ export const PublicViews = {
 
       const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(messageLines.join('\\n'))}`;
       window.open(waUrl, '_blank', 'noopener');
+    };
+  },
+
+  // --- SEPARATE T7 SHOP ---
+  async renderShop(queryStr = '') {
+    const app = document.getElementById('app-content');
+    if (!app) return;
+    const settings = DBService.getSettingsSync();
+    const rawWa = String(settings.whatsappNumber || settings.phone || '').replace(/\D/g, '');
+    const wa = rawWa.length === 10 ? '91' + rawWa : rawWa;
+    const params = new URLSearchParams(queryStr);
+    const initialCategory = params.get('category') || 'all';
+     let shopProducts = [], shopServices = [];
+     try {
+       [shopProducts, shopServices] = await Promise.race([
+         Promise.all([
+           DBService.getProductsCatalog(),
+           DBService.getServicesCatalog()
+         ]),
+         new Promise(resolve => setTimeout(() => resolve([
+           DBService.getProductsCatalogSync(),
+           DBService.getServicesCatalogSync()
+         ]), 1000))
+       ]);
+     } catch (err) {
+       console.warn('[SHOP] Catalog fetch error, using sync cache:', err);
+       shopProducts = DBService.getProductsCatalogSync();
+       shopServices = DBService.getServicesCatalogSync();
+     }
+     const dynamicItems = [
+       ...(shopProducts || []).filter(p => p.status !== 'Inactive' && p.t7ShopEnabled).map(p => ({
+         id:p.id, category:p.t7ShopCategory || 'amd', title:p.name || 'Product', icon:p.icon || '📦',
+         description:p.description || 'T7 Shop product',
+         price:Number(p.price)>0 ? `₹${Number(p.price).toFixed(2)}` : 'Price on request',
+         action:p.t7ShopAction || 'enquiry',
+         imageUrl:p.imageUrl || ''
+       })),
+       ...(shopServices || []).filter(s => s.status !== 'Inactive' && s.t7ShopEnabled).map(s => ({
+         id:s.id, category:s.t7ShopCategory || 'services', title:s.title || 'Service', icon:s.icon || '🛠️',
+         description:s.description || 'T7 Shop service', price:s.startingPrice || 'Price on request',
+         action:s.t7ShopAction || 'service'
+       }))
+     ];
+     const shopItems = [...T7_SHOP_ITEMS, ...dynamicItems];
+
+    app.innerHTML = `
+      <section class="t7-shop-page" style="padding:3rem 0 5rem;">
+        <div class="container">
+          <div class="glass-panel" style="padding:2rem; margin-bottom:1.5rem; overflow:hidden; position:relative;">
+            <div style="position:absolute;right:-70px;top:-90px;width:240px;height:240px;border-radius:50%;background:var(--primary-glow);filter:blur(10px);"></div>
+            <div style="position:relative;z-index:1;">
+              <span class="badge badge-approved">🛍️ T7 SHOP</span>
+              <h1 style="font-size:2.6rem;margin:.6rem 0;">Sales, Services, Design & Driver Booking</h1>
+              <p class="text-muted" style="max-width:800px;font-size:1rem;">
+                Buy laptops and PCs, choose AMD components and accessories, book computer services,
+                order flex/visiting-card/poster/photo work, or book a driver with or without a car.
+              </p>
+              <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:1.25rem;">
+                <a href="#shop?category=computers" class="btn btn-primary">💻 Computers</a>
+                <a href="#shop?category=design" class="btn btn-secondary">🎨 Design & Print</a>
+                <a href="#shop?category=driver" class="btn btn-secondary">🚗 Driver Booking</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="t7-shop-category-grid" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.75rem;margin-bottom:1.5rem;">
+            <button class="btn btn-outline shop-filter-btn" data-shop-category="all">🛍️ All</button>
+            ${T7_SHOP_CATEGORIES.map(c => `
+              <button class="btn btn-outline shop-filter-btn" data-shop-category="${c.id}">${c.icon} ${c.title}</button>
+            `).join('')}
+          </div>
+
+          <div id="t7-shop-grid" class="services-grid">
+            ${shopItems.map(item => `
+              <article class="service-card t7-shop-item" data-shop-item-category="${item.category}" style="position:relative;">
+                ${item.imageUrl
+                  ? `<div style="height:190px;margin:-.25rem -.25rem 1rem;overflow:hidden;border-radius:10px;background:var(--bg-body);"><img src="${item.imageUrl}" alt="${item.title}" loading="lazy" style="width:100%;height:100%;object-fit:cover;"></div>`
+                  : `<div class="service-icon">${item.icon}</div>`}
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
+                  <span class="badge badge-waiting" style="font-size:.7rem;">${T7_SHOP_CATEGORIES.find(c=>c.id===item.category)?.title || 'Shop'}</span>
+                </div>
+                <h3 style="margin:.7rem 0 .5rem;">${item.title}</h3>
+                <p class="text-muted" style="font-size:.88rem;flex:1;">${item.description}</p>
+                <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;gap:.75rem;">
+                  <strong style="color:var(--primary);">${item.price}</strong>
+                  ${item.action === 'driver'
+                    ? `<button class="btn btn-primary btn-sm shop-driver-btn" data-driver-type="${item.id}">Book Now</button>`
+                    : item.action === 'service'
+                      ? `<button class="btn btn-primary btn-sm shop-service-btn" data-shop-service="${item.title}">Book / Enquire</button>`
+                      : `<button class="btn btn-primary btn-sm shop-buy-btn" data-shop-product="${item.title}">Buy / Enquire</button>`}
+                </div>
+              </article>
+            `).join('')}
+          </div>
+
+          <div id="t7-shop-booking-panel" class="glass-panel" style="display:none;padding:1.5rem;margin-top:2rem;">
+            <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;">
+              <div>
+                <h2 id="t7-shop-booking-title" style="margin:0;">Booking</h2>
+                <p class="text-muted" style="margin:.35rem 0 0;">Enter your details. The request will open in WhatsApp for confirmation.</p>
+              </div>
+              <button type="button" class="btn btn-outline btn-sm" id="t7-shop-booking-close">✕ Close</button>
+            </div>
+            <form id="t7-shop-booking-form" style="margin-top:1.25rem;">
+              <input type="hidden" id="t7-shop-request-type">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;">
+                <div class="form-group"><label class="form-label">Name *</label><input class="form-control" id="shop-book-name" required></div>
+                <div class="form-group"><label class="form-label">Mobile *</label><input class="form-control" id="shop-book-phone" required inputmode="tel"></div>
+                <div class="form-group"><label class="form-label">Preferred Date</label><input class="form-control" id="shop-book-date" type="date"></div>
+                <div class="form-group"><label class="form-label">Preferred Time</label><input class="form-control" id="shop-book-time" type="time"></div>
+              </div>
+              <div id="t7-driver-fields" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;">
+                  <div class="form-group"><label class="form-label">Driver Booking</label><select class="form-select" id="shop-driver-mode"><option value="Driver With Car">Driver With Car</option><option value="Driver Without Car">Driver Without Car</option></select></div>
+                  <div class="form-group"><label class="form-label">Duration</label><input class="form-control" id="shop-driver-duration" placeholder="e.g. 4 hours / 1 day"></div>
+                  <div class="form-group"><label class="form-label">Pickup Location *</label><input class="form-control" id="shop-driver-pickup"></div>
+                  <div class="form-group"><label class="form-label">Drop / Route</label><input class="form-control" id="shop-driver-drop"></div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Requirement / Product Details</label>
+                <textarea class="form-control" id="shop-book-details" rows="4" placeholder="Laptop model, PC specification, flex size, card quantity, poster size, photo-frame size, service problem, etc."></textarea>
+              </div>
+              <button class="btn btn-primary btn-lg" type="submit" style="width:100%;">📲 Send Request on WhatsApp</button>
+            </form>
+          </div>
+        </div>
+      </section>
+    `;
+
+    const filterButtons = app.querySelectorAll('.shop-filter-btn');
+    const items = app.querySelectorAll('.t7-shop-item');
+    const applyFilter = (cat) => {
+      items.forEach(el => {
+        el.style.display = (cat === 'all' || el.dataset.shopItemCategory === cat) ? '' : 'none';
+      });
+      filterButtons.forEach(btn => btn.classList.toggle('btn-primary', btn.dataset.shopCategory === cat));
+    };
+    filterButtons.forEach(btn => btn.addEventListener('click', () => {
+      const cat = btn.dataset.shopCategory;
+      applyFilter(cat);
+      history.replaceState(null, '', `#shop${cat === 'all' ? '' : '?category=' + encodeURIComponent(cat)}`);
+    }));
+    applyFilter(initialCategory);
+
+    const panel = document.getElementById('t7-shop-booking-panel');
+    const form = document.getElementById('t7-shop-booking-form');
+    const titleEl = document.getElementById('t7-shop-booking-title');
+    const requestType = document.getElementById('t7-shop-request-type');
+    const driverFields = document.getElementById('t7-driver-fields');
+
+    const openBooking = (type, title) => {
+      panel.style.display = '';
+      titleEl.textContent = title;
+      requestType.value = type;
+      driverFields.style.display = type === 'driver' ? '' : 'none';
+      if (type === 'driver') {
+        const select = document.getElementById('shop-driver-mode');
+        select.value = title.includes('Without') ? 'Driver Without Car' : 'Driver With Car';
+      }
+      panel.scrollIntoView({ behavior:'smooth', block:'start' });
+    };
+
+    app.querySelectorAll('.shop-driver-btn').forEach(btn => btn.addEventListener('click', () => {
+      openBooking('driver', btn.dataset.driverType === 'driver-without-car' ? 'Driver Without Car' : 'Driver With Car');
+    }));
+    app.querySelectorAll('.shop-service-btn').forEach(btn => btn.addEventListener('click', () => openBooking('service', btn.dataset.shopService)));
+    app.querySelectorAll('.shop-buy-btn').forEach(btn => btn.addEventListener('click', () => openBooking('product', btn.dataset.shopProduct)));
+    document.getElementById('t7-shop-booking-close').onclick = () => { panel.style.display = 'none'; };
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const get = id => document.getElementById(id)?.value?.trim() || '';
+      const name = get('shop-book-name'), phone = get('shop-book-phone');
+      if (!name || !phone) {
+        NotificationService.showToast('Please enter your name and mobile number.', 'warning');
+        return;
+      }
+      const type = get('t7-shop-request-type');
+      const lines = [
+        `T7 SHOP REQUEST`,
+        `Type: ${type === 'driver' ? 'Driver Booking' : type === 'product' ? 'Product / Sales Enquiry' : 'Service / Design Request'}`,
+        `Item / Service: ${titleEl.textContent}`,
+        `Customer: ${name}`,
+        `Mobile: ${phone}`,
+        `Preferred Date: ${get('shop-book-date') || 'Not specified'}`,
+        `Preferred Time: ${get('shop-book-time') || 'Not specified'}`
+      ];
+      if (type === 'driver') {
+        lines.push(
+          `Driver Type: ${get('shop-driver-mode')}`,
+          `Duration: ${get('shop-driver-duration') || 'Not specified'}`,
+          `Pickup: ${get('shop-driver-pickup') || 'Not specified'}`,
+          `Drop / Route: ${get('shop-driver-drop') || 'Not specified'}`
+        );
+      }
+      lines.push(`Details: ${get('shop-book-details') || 'Not specified'}`);
+      try {
+        await DBService.saveBookingRequest({
+          type,
+          itemService: titleEl.textContent,
+          customerName: name,
+          customerPhone: phone,
+          preferredDate: get('shop-book-date'),
+          preferredTime: get('shop-book-time'),
+          driverType: type === 'driver' ? get('shop-driver-mode') : '',
+          duration: type === 'driver' ? get('shop-driver-duration') : '',
+          pickup: type === 'driver' ? get('shop-driver-pickup') : '',
+          dropRoute: type === 'driver' ? get('shop-driver-drop') : '',
+          details: get('shop-book-details'),
+          source: 'T7 Shop',
+          status: 'New'
+        });
+      } catch (err) {
+        console.error('[T7 SHOP] Booking save failed:', err);
+        NotificationService.showToast('Booking could not be saved. Please try again.', 'error');
+        return;
+      }
+      if (!wa) {
+        NotificationService.showToast('Shop WhatsApp number is not configured.', 'warning');
+        return;
+      }
+      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank', 'noopener');
     };
   },
 
@@ -2612,5 +2868,124 @@ export const PublicViews = {
         </div>
       </section>
     `;
+  },
+
+  // --- ABOUT T7 PRINT HUB ---
+  renderAboutHTML(aboutData = {}) {
+    const data = {
+      ...DEFAULT_ABOUT_PAGE,
+      ...aboutData,
+      creator: { ...DEFAULT_ABOUT_PAGE.creator, ...(aboutData.creator || {}) },
+      contact: { ...DEFAULT_ABOUT_PAGE.contact, ...(aboutData.contact || {}) },
+      socialLinks: { ...DEFAULT_ABOUT_PAGE.socialLinks, ...(aboutData.socialLinks || {}) },
+      services: Array.isArray(aboutData.services) && aboutData.services.length > 0 ? aboutData.services : DEFAULT_ABOUT_PAGE.services,
+      steps: Array.isArray(aboutData.steps) && aboutData.steps.length > 0 ? aboutData.steps : DEFAULT_ABOUT_PAGE.steps
+    };
+
+    const c = data.creator || {};
+    const defaultAvatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%233b82f6"><circle cx="50" cy="35" r="22"/><path d="M15,88 C15,65 30,55 50,55 C70,55 85,65 85,88 Z"/></svg>`;
+    const creatorAvatarUrl = c.imageUrl && c.imageUrl.trim() ? c.imageUrl : defaultAvatarSvg;
+    const cleanWa = (c.whatsapp || c.phone || '').replace(/\D/g, '');
+    const waLink = cleanWa ? `https://wa.me/${cleanWa.length === 10 ? '91' + cleanWa : cleanWa}?text=${encodeURIComponent('Hi Vignesh! I have an inquiry from T7 Print Hub.')}` : '#contact';
+    const telLink = c.phone ? `tel:${c.phone}` : '#contact';
+
+    const activeServices = data.services.filter(s => s.enabled !== false);
+    const activeSteps = data.steps.filter(s => s.enabled !== false);
+
+    return `
+      <section style="padding:4rem 0 5rem;">
+        <div class="container" style="max-width:1100px;">
+          <!-- Title & Header -->
+          <div class="text-center mb-5">
+            <span class="badge badge-primary">${data.title || 'ABOUT T7 PRINT HUB'}</span>
+            <h1 style="font-size:clamp(2rem,5vw,3.4rem);margin:.8rem 0 1rem;">${data.subtitle || 'Your Local Digital Printing & Service Hub'}</h1>
+            <p class="text-muted" style="max-width:760px;margin:auto;font-size:1.05rem;line-height:1.8;">
+              ${data.description}
+            </p>
+          </div>
+
+          <!-- Creator Section -->
+          ${c.enabled !== false ? `
+            <div class="glass-panel" style="padding:2rem;margin-bottom:2.5rem;border-radius:18px;background:var(--bg-card);border:1px solid var(--border-color);box-shadow:var(--shadow-md);">
+              <div style="display:flex;gap:2rem;align-items:center;flex-wrap:wrap;">
+                <div style="width:120px;height:120px;border-radius:50%;overflow:hidden;border:3px solid var(--primary);flex-shrink:0;background:#f1f5f9;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(59,130,246,0.25);">
+                  <img src="${creatorAvatarUrl}" alt="${c.name || 'Creator'}" style="width:100%;height:100%;object-fit:cover;" onerror="this.onerror=null;this.src='${defaultAvatarSvg}';" />
+                </div>
+                <div style="flex:1;min-width:260px;">
+                  <span class="badge badge-approved" style="font-size:0.75rem;margin-bottom:0.4rem;">${c.role || 'Developer & Creator'}</span>
+                  <h2 style="margin:0.2rem 0 0.5rem;font-size:1.6rem;color:var(--text-main);">${c.heading || 'This App Was Created by Vignesh'}</h2>
+                  <p class="text-muted" style="margin:0;line-height:1.7;font-size:0.95rem;">
+                    ${c.description}
+                  </p>
+                  <div style="display:flex;gap:0.85rem;flex-wrap:wrap;margin-top:1.25rem;">
+                    <a href="${telLink}" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:0.4rem;">${c.callBtnText || `📞 Contact ${c.name} — ${c.phone}`}</a>
+                    <a href="${waLink}" target="_blank" rel="noopener" class="btn btn-success" style="display:inline-flex;align-items:center;gap:0.4rem;background:#10b981;border-color:#10b981;color:white;">${c.whatsappBtnText || '💬 WhatsApp Vignesh'}</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Services Showcase -->
+          ${activeServices.length > 0 ? `
+            <h2 class="text-center" style="margin:2.5rem 0 1.25rem;">What You Can Use T7 Print Hub For</h2>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1.25rem;">
+              ${activeServices.map(s => `
+                <div class="glass-panel" style="padding:1.5rem;border-radius:14px;">
+                  ${s.imageUrl
+                    ? `<div style="height:140px;margin:-0.5rem -0.5rem 0.85rem;overflow:hidden;border-radius:10px;"><img src="${s.imageUrl}" alt="${s.title}" style="width:100%;height:100%;object-fit:cover;"></div>`
+                    : `<div style="font-size:2.2rem;margin-bottom:0.5rem;">${s.icon || '📄'}</div>`}
+                  <h3 style="margin:0 0 0.4rem;font-size:1.15rem;">${s.title}</h3>
+                  <p class="text-muted" style="font-size:0.88rem;line-height:1.5;margin:0;">${s.description}</p>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+
+          <!-- How It Works Steps -->
+          ${activeSteps.length > 0 ? `
+            <div class="glass-panel" style="padding:2rem;margin-top:2.5rem;border-radius:16px;">
+              <h2 style="margin:0 0 1rem;font-size:1.4rem;">How T7 Print Hub Helps</h2>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.25rem;margin-top:1rem;">
+                ${activeSteps.map(step => `
+                  <div>
+                    <div style="font-weight:800;color:var(--primary);font-size:1rem;margin-bottom:0.25rem;">${step.number || '●'}. ${step.title}</div>
+                    <p class="text-muted" style="font-size:0.88rem;line-height:1.5;margin:0;">${step.description}</p>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Contact & Help Footer Section -->
+          <div class="text-center" style="margin-top:3rem;padding-top:2rem;border-top:1px solid var(--border-color);">
+            <h2 style="font-size:1.5rem;margin-bottom:0.5rem;">Need Help?</h2>
+            <p class="text-muted" style="max-width:550px;margin:0 auto 1.25rem;">For app, printing, product or service enquiries, contact the team directly.</p>
+            <div style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;">
+              <a href="${telLink}" class="btn btn-primary">📞 ${c.phone || data.contact?.phone || '9360039283'}</a>
+              <a href="#contact" class="btn btn-outline">✉️ Contact Us</a>
+              <a href="#shop" class="btn btn-outline">🛍️ Visit T7 Shop</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
+  async renderAbout(queryStr = '') {
+    const app = document.getElementById('app-content');
+    if (!app) return;
+
+    let aboutData = DEFAULT_ABOUT_PAGE;
+    try {
+      aboutData = await Promise.race([
+        DBService.getAboutPage(),
+        new Promise(resolve => setTimeout(() => resolve(DBService.getAboutPageSync()), 1000))
+      ]);
+    } catch (e) {
+      aboutData = DBService.getAboutPageSync();
+    }
+
+    app.innerHTML = this.renderAboutHTML(aboutData);
   }
 };

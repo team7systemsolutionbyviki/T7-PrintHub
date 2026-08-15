@@ -22,6 +22,7 @@ let db          = null;
 let auth        = null;
 let storage     = null;
 let _initPromise = null;  // Singleton promise — prevents double-init
+let firebaseInitError = null;
 
 // Initialize Firebase — all 4 SDK modules loaded in PARALLEL
 export async function initFirebase() {
@@ -55,8 +56,10 @@ export async function initFirebase() {
       console.log('⚡ Firebase initialized (parallel load).');
       return { firebaseApp, db, auth, storage, mode: 'FIREBASE' };
     } catch (err) {
-      console.warn('Firebase SDK load error, falling back to Local Storage Engine:', err);
-      return { firebaseApp: null, db: null, auth: null, storage: null, mode: 'DEMO' };
+      firebaseInitError = err;
+      console.error('[FIREBASE INIT FAILED]', err);
+      // Do not silently label a real Firebase failure as DEMO/offline.
+      return { firebaseApp: null, db: null, auth: null, storage: null, mode: 'FIREBASE_ERROR', error: err };
     }
   })();
 
@@ -64,5 +67,9 @@ export async function initFirebase() {
 }
 
 export function getServices() {
-  return { db, auth, storage, firebaseApp, isDemo: !isFirebaseConfigured() };
+  return {
+    db, auth, storage, firebaseApp,
+    isDemo: !isFirebaseConfigured(),
+    firebaseInitError
+  };
 }

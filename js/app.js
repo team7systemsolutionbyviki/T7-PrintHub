@@ -86,7 +86,7 @@ window.refreshShopSettingsUI = (settings) => {
 
   // 5. Re-render active public route if currently visible to capture component template updates
   const currentHash = (window.location.hash || '#home').slice(1).split('?')[0];
-  const publicRoutes = ['home', 'services', 'pricing', 'how-it-works', 'faq', 'order', 'service-request', 'track', 'contact', 'privacy', 'terms', ''];
+  const publicRoutes = ['home', 'shop', 'services', 'how-it-works', 'faq', 'order', 'service-request', 'track', 'contact', 'privacy', 'terms', ''];
   if (publicRoutes.includes(currentHash)) {
     Router.handleRoute();
   }
@@ -125,7 +125,27 @@ function hideLoader() {
 const initApp = async () => {
   try {
     // ── Step 1: Register all SPA routes ──────────────────────────────────────
-    Router.register('home',        (q) => { NavbarComponent.render(); PublicViews.renderHome(q);      window.updateFloatingButtons(); });
+    Router.register('home',        async (q) => {
+      try {
+        NavbarComponent.render();
+        await PublicViews.renderHome(q);
+        window.updateFloatingButtons();
+      } catch (error) {
+        console.error('[HOME PAGE ERROR]', error);
+        const app = document.getElementById('app-content');
+        if (app) {
+          app.innerHTML = `
+            <section style="min-height:55vh;display:flex;align-items:center;justify-content:center;padding:2rem;">
+              <div class="glass-panel" style="max-width:650px;width:100%;padding:2rem;text-align:center;">
+                <h2>⚠️ Page could not be loaded</h2>
+                <p class="text-muted">The home page hit a temporary loading error. Please refresh the page.</p>
+                <button class="btn btn-primary" onclick="location.reload()">🔄 Reload Page</button>
+              </div>
+            </section>`;
+        }
+      }
+    });
+    Router.register('shop',        (q) => { NavbarComponent.render(); PublicViews.renderShop(q);      window.updateFloatingButtons(); });
     Router.register('services',    (q) => { NavbarComponent.render(); PublicViews.renderServices(q);  window.updateFloatingButtons(); });
     Router.register('pricing',     (q) => { NavbarComponent.render(); PublicViews.renderPriceList(q); window.updateFloatingButtons(); });
     Router.register('how-it-works', async (q) => {
@@ -142,6 +162,7 @@ const initApp = async () => {
     Router.register('service-request', (q) => { NavbarComponent.render(); PublicViews.renderServiceRequest(q); window.updateFloatingButtons(); });
     Router.register('track',   (q) => { NavbarComponent.render(); PublicViews.renderTrackOrder(q);  window.updateFloatingButtons(); });
     Router.register('contact', (q) => { NavbarComponent.render(); PublicViews.renderContact(q);     window.updateFloatingButtons(); });
+    Router.register('about',   (q) => { NavbarComponent.render(); PublicViews.renderAbout(q);      window.updateFloatingButtons(); });
     Router.register('privacy', (q) => {
       NavbarComponent.render();
       const app = document.getElementById('app-content');
@@ -182,6 +203,8 @@ const initApp = async () => {
     Router.register('admin-customers',    (q) => { AdminViews.renderCustomers(q); });
     Router.register('admin-reports',      (q) => { AdminViews.renderReports(q); });
     Router.register('admin-settings',     (q) => { AdminViews.renderSettings(q); });
+    Router.register('admin-about',        (q) => { AdminViews.renderAboutSettings(q); });
+    Router.register('admin-firebase-diagnostic', (q) => { AdminViews.renderFirebaseDiagnostic(q); });
 
     // Customer Route
     Router.register('customer-dashboard', (q) => { NavbarComponent.render(); CustomerViews.renderCustomerDashboard(q); });
@@ -220,14 +243,14 @@ const initApp = async () => {
     // ── Step 4: AWAIT Firebase init + settings load BEFORE first render ───────
     console.log('[APP] Waiting for Firebase Shop Settings...');
     try {
-      await initFirebase();
-      await DBService.getSettings(true); // Force fresh fetch from Firebase server
-
-      // Load the service catalog before the first public-page render.
-      // Without this, renderHome()/renderServices() can use DEFAULT_SERVICES
-      // on a fresh refresh and show an old price until another render occurs.
-      await DBService.getServicesCatalog();
-
+      await Promise.race([
+        (async () => {
+          await initFirebase();
+          await DBService.getSettings(true); // Force fresh fetch from Firebase server
+          await DBService.getServicesCatalog();
+        })(),
+        new Promise(resolve => setTimeout(resolve, 2000))
+      ]);
       console.log('[APP] Firebase Shop Settings and Service Catalog loaded');
     } catch (firebaseErr) {
       console.warn('[APP] Firebase init failed, using defaults:', firebaseErr);
@@ -254,7 +277,11 @@ const initApp = async () => {
 
   } catch (err) {
     console.error('[App] Critical init error:', err);
-    try { Router.init(); } catch (e) {}
+    try {
+      hideLoader();
+      Router.init();
+      window.refreshShopSettingsUI();
+    } catch (e) {}
   }
 };
 

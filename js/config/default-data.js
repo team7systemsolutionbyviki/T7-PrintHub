@@ -292,3 +292,66 @@ export const FAQS = [
     a: "Yes! Use the 'Track Order' page and enter your Order ID or registered Phone Number to view real-time progression from Pending to Printing and Pickup."
   }
 ];
+
+export const DEFAULT_ABOUT_PAGE = {
+  title: "T7 Print Hub",
+  subtitle: "Your Local Digital Printing & Service Hub",
+  description: "T7 Print Hub is designed to make printing, design, product shopping and service booking simple from one place. Customers can choose a service, upload documents when required, select their options, request services and contact the shop directly.",
+  bannerImageUrl: "",
+
+  creator: {
+    enabled: true,
+    name: "Vignesh",
+    heading: "This App Was Created by Vignesh",
+    role: "Developer & Creator",
+    description: "This application was created by Vignesh. T7 Print Hub is a practical digital platform to bring printing, creative design, shop products and local service requests together in a simple customer-friendly experience.",
+    imageUrl: "",
+    phone: "9360039283",
+    whatsapp: "919360039283",
+    callBtnText: "📞 Contact Vignesh — 9360039283",
+    whatsappBtnText: "💬 WhatsApp Vignesh"
+  },
+
+  services: [
+    { id: "srv-doc", icon: "🖨️", title: "Document Printing", description: "Upload documents and choose paper size, colour or black-and-white printing, page ranges, binding and other print options.", enabled: true, imageUrl: "" },
+    { id: "srv-color", icon: "🎨", title: "Color Printing", description: "Vibrant full-color document and photo prints on standard and premium glossy paper.", enabled: true, imageUrl: "" },
+    { id: "srv-bw", icon: "⬛", title: "Black & White Printing", description: "Crisp black and white printing at high speed for lab manuals, study notes, and legal documents.", enabled: true, imageUrl: "" },
+    { id: "srv-thesis", icon: "📘", title: "Thesis / Project Printing", description: "Professional project report and thesis printing with embossed gold lettering and hard binding.", enabled: true, imageUrl: "" },
+    { id: "srv-binding", icon: "📚", title: "Binding", description: "Spiral, soft thermal glue, and hardcover thesis binding options available.", enabled: true, imageUrl: "" },
+    { id: "srv-lamination", icon: "📄", title: "Lamination", description: "Protective thermal lamination for certificates, ID cards, and documents.", enabled: true, imageUrl: "" },
+    { id: "srv-flex", icon: "🖼️", title: "Flex Printing", description: "High quality indoor and outdoor flex banner printing for events and businesses.", enabled: true, imageUrl: "" },
+    { id: "srv-card", icon: "🪪", title: "Visiting Card Design", description: "Custom business card design and printing with matte or glossy finish.", enabled: true, imageUrl: "" },
+    { id: "srv-poster", icon: "📢", title: "Poster Design", description: "Eye-catching event, academic, and promotional poster design and printing.", enabled: true, imageUrl: "" },
+    { id: "srv-frame", icon: "🖼️", title: "Photo Frame", description: "Custom wall and tabletop photo framing with synthetic or wooden frames.", enabled: true, imageUrl: "" },
+    { id: "srv-edit", icon: "📸", title: "Photo Editing", description: "Background removal, color correction, photo touchup, and passport photo work.", enabled: true, imageUrl: "" },
+    { id: "srv-laptop-sales", icon: "💻", title: "Laptop & PC Sales", description: "New and refurbished laptops, desktop PCs, and custom AMD gaming rigs.", enabled: true, imageUrl: "" },
+    { id: "srv-pc-service", icon: "🛠️", title: "Computer/Laptop Services", description: "OS installation, hardware upgrade, motherboard repair, and virus removal.", enabled: true, imageUrl: "" },
+    { id: "srv-accessories", icon: "⌨️", title: "Computer Accessories", description: "Keyboards, mice, pen drives, cables, and daily stationery items.", enabled: true, imageUrl: "" },
+    { id: "srv-driver-car", icon: "🚗", title: "Driver With Car", description: "Book an experienced driver along with a comfortable vehicle for local or outstation travel.", enabled: true, imageUrl: "" },
+    { id: "srv-driver-nocar", icon: "👨‍✈️", title: "Driver Without Car", description: "Hire a professional driver to drive your personal car for short trips or full days.", enabled: true, imageUrl: "" }
+  ],
+
+  steps: [
+    { number: 1, title: "Choose", description: "Select a product, printing option or service.", enabled: true },
+    { number: 2, title: "Customize", description: "Enter your requirements, page ranges, quantities or service details.", enabled: true },
+    { number: 3, title: "Submit", description: "Send the request and provide your contact details.", enabled: true },
+    { number: 4, title: "Connect", description: "The shop can contact you and process the order or booking.", enabled: true }
+  ],
+
+  contact: {
+    phone: "9360039283",
+    whatsapp: "919360039283",
+    email: "orders@team7system.com",
+    address: "No. 45, Tech Park Road, Near Main Bus Stand, Sector 7, Chennai, Tamil Nadu - 600001",
+    mapsUrl: "",
+    businessHours: "Mon - Sat: 9:00 AM - 9:00 PM | Sun: 10:00 AM - 6:00 PM"
+  },
+
+  socialLinks: {
+    facebook: "https://facebook.com",
+    instagram: "https://instagram.com",
+    youtube: "",
+    website: ""
+  }
+};
+

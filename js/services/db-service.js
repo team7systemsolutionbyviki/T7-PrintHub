@@ -5,7 +5,7 @@
    ========================================================================== */
 
 import { getServices } from '../config/firebase-config.js';
-import { DEFAULT_SETTINGS, DEFAULT_PRICING, DEFAULT_SERVICES, DEFAULT_PRODUCTS } from '../config/default-data.js';
+import { DEFAULT_SETTINGS, DEFAULT_PRICING, DEFAULT_SERVICES, DEFAULT_PRODUCTS, DEFAULT_ABOUT_PAGE } from '../config/default-data.js';
 
 // ── In-memory caches (zero-latency on second access, no localStorage) ───────
 let _ordersCache   = null;   // Array<Order>  | null
@@ -13,6 +13,8 @@ let _settingsCache = null;   // Object        | null
 let _pricingCache  = null;   // Object        | null
 let _catalogCache  = null;   // Array<Service>| null
 let _productsCache = null;   // Array<Product>| null
+let _bookingCache  = null;   // Array<BookingRequest> | null
+let _aboutCache    = null;   // Object | null
 let _cloudSyncBusy = false;
 
 // ── Lazy-load Firebase module references (cached by JS engine) ───────────────
@@ -772,6 +774,45 @@ export const DBService = {
   },
 
   // ══════════════════════════════════════════════════════════════════════
+  //  T7 SHOP BOOKING REQUESTS
+  // ══════════════════════════════════════════════════════════════════════
+  async getBookingRequests(forceRefresh = false) {
+    if (this._bookingCache && !forceRefresh) return this._bookingCache;
+    const { db, isDemo } = svc();
+    if (isDemo || !db) return (this._bookingCache = this._bookingCache || []);
+    try {
+      const { collection, getDocs, query, orderBy } = await fs();
+      const snap = await getDocs(query(collection(db, 'bookingRequests'), orderBy('createdAt', 'desc')));
+      this._bookingCache = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    } catch (e) {
+      console.warn('[BOOKINGS] Fetch error:', e);
+      this._bookingCache = this._bookingCache || [];
+    }
+    return this._bookingCache;
+  },
+
+  async saveBookingRequest(data) {
+    const request = { id:data.id || 'BK-' + Date.now(), createdAt:data.createdAt || new Date().toISOString(), status:data.status || 'New', ...data };
+    const list = await this.getBookingRequests();
+    const idx = list.findIndex(x => x.id === request.id);
+    if (idx >= 0) list[idx] = { ...list[idx], ...request }; else list.unshift(request);
+    this._bookingCache = list;
+    const { db, isDemo } = svc();
+    if (!isDemo && db) {
+      const { doc, setDoc } = await fs();
+      await setDoc(doc(db, 'bookingRequests', request.id), request, { merge:true });
+    }
+    return request;
+  },
+
+  async updateBookingStatus(id, status) {
+    const list = await this.getBookingRequests();
+    const item = list.find(x => x.id === id);
+    if (!item) return null;
+    return this.saveBookingRequest({ ...item, status, updatedAt:new Date().toISOString() });
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
   //  SERVICE CATALOG — Firestore backed, memory cached
   // ══════════════════════════════════════════════════════════════════════
 
@@ -862,5 +903,76 @@ export const DBService = {
     }
     window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
     return true;
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  ABOUT PAGE SETTINGS — Firestore backed (`aboutPage/general`), memory cached
+  // ══════════════════════════════════════════════════════════════════════
+
+  getAboutPageSync() {
+    return _aboutCache || DEFAULT_ABOUT_PAGE;
+  },
+
+  async getAboutPage(forceRefresh = false) {
+    if (_aboutCache && !forceRefresh) return _aboutCache;
+
+    const { db, isDemo } = svc();
+    if (!isDemo && db) {
+      try {
+        const { doc, getDoc } = await fs();
+        const docRef = doc(db, 'aboutPage', 'general');
+        const snap = await getDoc(docRef).catch(() => null);
+
+        if (snap && snap.exists()) {
+          const data = snap.data();
+          _aboutCache = {
+            ...DEFAULT_ABOUT_PAGE,
+            ...data,
+            creator: { ...DEFAULT_ABOUT_PAGE.creator, ...(data.creator || {}) },
+            contact: { ...DEFAULT_ABOUT_PAGE.contact, ...(data.contact || {}) },
+            socialLinks: { ...DEFAULT_ABOUT_PAGE.socialLinks, ...(data.socialLinks || {}) },
+            services: Array.isArray(data.services) && data.services.length > 0 ? data.services : DEFAULT_ABOUT_PAGE.services,
+            steps: Array.isArray(data.steps) && data.steps.length > 0 ? data.steps : DEFAULT_ABOUT_PAGE.steps
+          };
+          return _aboutCache;
+        }
+      } catch (e) {
+        console.warn('[ABOUT] Firestore fetch error:', e);
+      }
+    }
+
+    _aboutCache = JSON.parse(JSON.stringify(DEFAULT_ABOUT_PAGE));
+    return _aboutCache;
+  },
+
+  async saveAboutPage(aboutData) {
+    const merged = {
+      ...DEFAULT_ABOUT_PAGE,
+      ..._aboutCache,
+      ...aboutData,
+      creator: { ...DEFAULT_ABOUT_PAGE.creator, ...(_aboutCache?.creator || {}), ...(aboutData.creator || {}) },
+      contact: { ...DEFAULT_ABOUT_PAGE.contact, ...(_aboutCache?.contact || {}), ...(aboutData.contact || {}) },
+      socialLinks: { ...DEFAULT_ABOUT_PAGE.socialLinks, ...(_aboutCache?.socialLinks || {}), ...(aboutData.socialLinks || {}) },
+      services: Array.isArray(aboutData.services) ? aboutData.services : (_aboutCache?.services || DEFAULT_ABOUT_PAGE.services),
+      steps: Array.isArray(aboutData.steps) ? aboutData.steps : (_aboutCache?.steps || DEFAULT_ABOUT_PAGE.steps)
+    };
+
+    _aboutCache = merged;
+
+    const { db, isDemo } = svc();
+    if (!isDemo && db) {
+      try {
+        const { doc, setDoc } = await fs();
+        await setDoc(doc(db, 'aboutPage', 'general'), merged, { merge: true });
+        console.log('[ABOUT] Saved to Firestore:', merged);
+      } catch (e) {
+        console.warn('[ABOUT] Save error:', e);
+        throw e;
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('aboutPageUpdated', { detail: _aboutCache }));
+    return _aboutCache;
   }
 };
+
