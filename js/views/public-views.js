@@ -1792,7 +1792,38 @@ export const PublicViews = {
     // Submit Order
     const btnSubmit = document.getElementById('btn-submit-final-order');
     if (btnSubmit) {
+      let isSubmitting = false;
+
+      const withTimeout = (promise, timeoutMs = 15000, operationName = 'Operation') => {
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            reject(new Error(`${operationName} timed out after ${Math.round(timeoutMs / 1000)} seconds. Please check your internet connection and try again.`));
+          }, timeoutMs);
+
+          promise
+            .then(res => {
+              clearTimeout(timer);
+              resolve(res);
+            })
+            .catch(err => {
+              clearTimeout(timer);
+              reject(err);
+            });
+        });
+      };
+
       btnSubmit.onclick = async () => {
+        if (isSubmitting) {
+          console.warn('[ORDER] Submission already in progress. Ignoring click.');
+          return;
+        }
+
+        // Offline / connectivity check
+        if (!navigator.onLine) {
+          NotificationService.showToast('Internet connection is unavailable. Please check your network and try again.', 'error');
+          return;
+        }
+
         const utr = document.getElementById('pay-utr')?.value.trim() || '';
         const payerName = document.getElementById('pay-name')?.value.trim() || '';
         const screenshotInput = document.getElementById('pay-screenshot');
@@ -1834,9 +1865,15 @@ export const PublicViews = {
           return;
         }
 
-        const originalText = btnSubmit.innerHTML;
+        isSubmitting = true;
         btnSubmit.disabled = true;
+        const originalText = btnSubmit.innerHTML;
         btnSubmit.innerHTML = '⏳ Submitting...';
+
+        console.log('[ORDER] Submission started');
+
+        // Pre-generate unique order ID
+        const uniqueOrderId = 'ORD-' + new Date().getFullYear() + '-' + Math.floor(100000 + Math.random() * 900000);
 
         // Show Full-Screen Loading Overlay
         let loadingOverlay = document.getElementById('order-submit-overlay');
@@ -1847,8 +1884,8 @@ export const PublicViews = {
         }
         loadingOverlay.style.cssText = `
           position: fixed; inset: 0; z-index: 99999;
-          background: rgba(10, 10, 20, 0.88);
-          backdrop-filter: blur(10px);
+          background: rgba(10, 10, 20, 0.92);
+          backdrop-filter: blur(12px);
           display: flex; align-items: center; justify-content: center;
           animation: fadeInOverlay 0.35s ease;
         `;
@@ -1859,7 +1896,7 @@ export const PublicViews = {
             @keyframes fadeInOverlay { from { opacity: 0; } to { opacity: 1; } }
             @keyframes fadeOutOverlay { from { opacity: 1; } to { opacity: 0; } }
             @keyframes spinRing { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-            @keyframes popIn { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
+            @keyframes popIn { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); } }
             @keyframes successPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); } 50% { box-shadow: 0 0 0 22px rgba(16,185,129,0); } }
             @keyframes confettiFall {
               0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
@@ -1868,75 +1905,111 @@ export const PublicViews = {
           `;
           document.head.appendChild(style);
         }
-        loadingOverlay.innerHTML = `
-          <div style="text-align:center; padding:2.5rem; max-width:420px; width:90%;">
-            <div style="position:relative; width:90px; height:90px; margin:0 auto 1.75rem;">
-              <div style="position:absolute; inset:0; border-radius:50%; border:4px solid rgba(255,255,255,0.1);"></div>
-              <div style="position:absolute; inset:0; border-radius:50%; border:4px solid transparent; border-top-color:#3b82f6; border-right-color:#8b5cf6; animation: spinRing 1.1s linear infinite;"></div>
-              <div style="position:absolute; inset:10px; border-radius:50%; border:3px solid transparent; border-bottom-color:#10b981; animation: spinRing 0.75s linear infinite reverse;"></div>
-              <div style="position:absolute; inset:22px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#8b5cf6); display:flex; align-items:center; justify-content:center; font-size:1.35rem;">🖨️</div>
-            </div>
-            <h3 style="color:#fff; font-size:1.45rem; font-weight:800; margin-bottom:0.6rem; letter-spacing:-0.01em;">Submitting Your Order...</h3>
-            <p style="color:rgba(255,255,255,0.65); font-size:0.92rem; line-height:1.6; margin-bottom:1.5rem;">Processing payment details &amp; uploading your order to our system. Please wait...</p>
-            <div style="background:rgba(255,255,255,0.07); border-radius:12px; padding:0.85rem 1.25rem; border:1px solid rgba(255,255,255,0.12);">
+
+        const updateProgressUI = (activeStepIndex, statusMessage) => {
+          const steps = [
+            'Saving payment details',
+            'Uploading payment proof',
+            'Saving order to cloud database',
+            'Sending confirmation',
+            'Order completed'
+          ];
+
+          let stepsHTML = '';
+          steps.forEach((stepName, idx) => {
+            const stepNum = idx + 1;
+            let icon = '<span style="color:rgba(255,255,255,0.3); font-weight:600;">○</span>';
+            let textColor = 'color:rgba(255,255,255,0.5);';
+
+            if (stepNum < activeStepIndex) {
+              icon = '<span style="color:#10b981; font-weight:800;">✓</span>';
+              textColor = 'color:rgba(255,255,255,0.85); font-weight:600;';
+            } else if (stepNum === activeStepIndex) {
+              icon = '<span style="width:8px; height:8px; border-radius:50%; background:#3b82f6; display:inline-block; animation: spinRing 1s linear infinite;"></span>';
+              textColor = 'color:#38bdf8; font-weight:700;';
+            }
+
+            stepsHTML += `
               <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.45rem;">
-                <span style="width:8px; height:8px; border-radius:50%; background:#3b82f6; display:inline-block; animation: spinRing 1s linear infinite;"></span>
-                <span style="color:rgba(255,255,255,0.75); font-size:0.82rem; font-weight:600;">Saving payment details</span>
+                <div style="width:16px; text-align:center;">${icon}</div>
+                <span style="${textColor} font-size:0.85rem;">${stepName}</span>
               </div>
-              <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.45rem;">
-                <span style="width:8px; height:8px; border-radius:50%; background:#8b5cf6; display:inline-block; animation: spinRing 1.3s linear infinite;"></span>
-                <span style="color:rgba(255,255,255,0.75); font-size:0.82rem; font-weight:600;">Syncing order to cloud database</span>
+            `;
+          });
+
+          loadingOverlay.innerHTML = `
+            <div style="text-align:center; padding:2.5rem; max-width:440px; width:90%;">
+              <div style="position:relative; width:84px; height:84px; margin:0 auto 1.5rem;">
+                <div style="position:absolute; inset:0; border-radius:50%; border:4px solid rgba(255,255,255,0.1);"></div>
+                <div style="position:absolute; inset:0; border-radius:50%; border:4px solid transparent; border-top-color:#3b82f6; border-right-color:#8b5cf6; animation: spinRing 1.1s linear infinite;"></div>
+                <div style="position:absolute; inset:10px; border-radius:50%; border:3px solid transparent; border-bottom-color:#10b981; animation: spinRing 0.75s linear infinite reverse;"></div>
+                <div style="position:absolute; inset:20px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#8b5cf6); display:flex; align-items:center; justify-content:center; font-size:1.3rem;">🖨️</div>
               </div>
-              <div style="display:flex; align-items:center; gap:0.6rem;">
-                <span style="width:8px; height:8px; border-radius:50%; background:#10b981; display:inline-block; animation: spinRing 0.9s linear infinite;"></span>
-                <span style="color:rgba(255,255,255,0.75); font-size:0.82rem; font-weight:600;">Sending confirmation notification</span>
+              <h3 style="color:#fff; font-size:1.4rem; font-weight:800; margin-bottom:0.5rem;">Submitting Your Order...</h3>
+              <p style="color:rgba(255,255,255,0.65); font-size:0.88rem; line-height:1.5; margin-bottom:1.5rem;">${statusMessage || 'Processing your request...'}</p>
+              <div style="background:rgba(255,255,255,0.06); border-radius:14px; padding:1rem 1.25rem; border:1px solid rgba(255,255,255,0.12); text-align:left;">
+                ${stepsHTML}
               </div>
             </div>
-          </div>
-        `;
+          `;
+        };
+
+        let isOrderSavedSuccessfully = false;
+        let createdOrder = null;
 
         try {
+          // STEP 1: Payment save started
+          console.log('[ORDER] Payment save started');
+          updateProgressUI(1, 'Validating payment information...');
+          await new Promise(r => setTimeout(r, 150));
+          console.log('[ORDER] Payment save completed');
+
+          // STEP 2: Screenshot upload (if provided)
           let screenshotUrl = '';
           let screenshotStoragePath = '';
           let screenshotIdbKey = '';
           let screenshotDataUrl = '';
-          if (screenshotInput && screenshotInput.files && screenshotInput.files[0]) {
-            const screenshotFile = screenshotInput.files[0];
+
+          const screenshotFile = screenshotInput && screenshotInput.files && screenshotInput.files[0];
+          if (screenshotFile) {
+            console.log('[ORDER] Screenshot upload started');
+            updateProgressUI(2, 'Uploading payment proof image...');
+
             const type = String(screenshotFile.type || '').toLowerCase();
             if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(screenshotFile.name || '')) {
-              if (loadingOverlay) loadingOverlay.remove();
-              btnSubmit.disabled = false;
-              btnSubmit.innerHTML = originalText;
-              NotificationService.showToast('Invalid file format: Payment proof must be JPG, JPEG, PNG, or WEBP.', 'error');
-              return;
+              throw new Error('Invalid payment proof format: Only JPG, JPEG, PNG, and WEBP images are allowed.');
             }
             if (screenshotFile.size > 10 * 1024 * 1024) {
-              if (loadingOverlay) loadingOverlay.remove();
-              btnSubmit.disabled = false;
-              btnSubmit.innerHTML = originalText;
-              NotificationService.showToast('Payment proof image size must be 10MB or smaller.', 'error');
-              return;
+              throw new Error('Payment proof image size must be 10MB or smaller.');
             }
 
             try {
               screenshotDataUrl = await StorageService.readFileAsDataURL(screenshotFile);
-              const uploaded = await StorageService.uploadPaymentProof(screenshotFile, 'ORD-PENDING');
+              const uploadTask = StorageService.uploadPaymentProof(screenshotFile, uniqueOrderId);
+              const uploaded = await withTimeout(uploadTask, 15000, 'Payment proof upload');
               screenshotUrl = uploaded.url || uploaded.downloadURL || '';
               screenshotStoragePath = uploaded.storagePath || '';
               screenshotIdbKey = uploaded.idbKey || '';
-            } catch (err) {
-              console.error('[PAYMENT PROOF] Upload error:', err);
-              if (loadingOverlay) loadingOverlay.remove();
-              btnSubmit.disabled = false;
-              btnSubmit.innerHTML = originalText;
-              NotificationService.showToast(`Payment proof upload failed: ${err.message || 'Storage error'}`, 'error');
-              return;
+              console.log('[ORDER] Screenshot upload completed:', screenshotUrl);
+            } catch (imgErr) {
+              console.error('[ORDER ERROR] Screenshot upload failed:', imgErr);
+              throw new Error(`Payment proof upload failed: ${imgErr.message || 'Storage upload error'}`);
             }
+          } else {
+            console.log('[ORDER] No payment screenshot attached. Skipping step 2.');
+            updateProgressUI(2, 'No payment proof attached (skipping upload)...');
+            await new Promise(r => setTimeout(r, 100));
           }
+
+          // STEP 3: Save order to Firestore
+          console.log('[ORDER] Firestore order save started');
+          updateProgressUI(3, 'Syncing order to cloud database...');
 
           const quote = updateCalculations();
 
-          const newOrder = await DBService.createOrder({
+          const orderPayload = {
+            id: uniqueOrderId,
+            orderId: uniqueOrderId,
             customerName: custName,
             customerPhone: custPhone,
             customerEmail: custEmail,
@@ -2011,109 +2084,128 @@ export const PublicViews = {
               screenshotIdbKey: screenshotIdbKey,
               status: screenshotUrl ? 'Proof Submitted' : 'Waiting Verification'
             }
-          });
+          };
 
-          // === SUCCESS SCREEN ===
-          // Spawn confetti particles
+          try {
+            const createOrderPromise = DBService.createOrder(orderPayload);
+            createdOrder = await withTimeout(createOrderPromise, 15000, 'Firestore order save');
+            isOrderSavedSuccessfully = true;
+            console.log('[ORDER] Firestore order save completed:', createdOrder.id);
+          } catch (dbErr) {
+            console.error('[ORDER ERROR] Firestore save failed:', dbErr);
+            throw new Error('Order could not be saved. Please check your internet connection and try again.');
+          }
+
+          // STEP 4: Non-blocking Notification Dispatch
+          console.log('[ORDER] Notification started');
+          updateProgressUI(4, 'Sending confirmation notification...');
+
+          (async () => {
+            try {
+              if (window.WhatsAppService?.sendOrderConfirmation) {
+                await window.WhatsAppService.sendOrderConfirmation(createdOrder);
+              }
+              console.log('[ORDER] Notification completed');
+            } catch (notifErr) {
+              console.warn('[ORDER WARNING] Background notification failed:', notifErr);
+            }
+          })();
+
+          // STEP 5: Order Completed & Success Screen
+          console.log('[ORDER] Submission completed');
+          updateProgressUI(5, 'Order completed successfully!');
+
+          // Spawn Confetti Particles
           const confettiColors = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
           for (let c = 0; c < 36; c++) {
             const dot = document.createElement('div');
             const size = 8 + Math.random() * 10;
             dot.style.cssText = `
-              position: fixed;
-              left: ${10 + Math.random() * 80}vw;
-              top: -20px;
-              width: ${size}px;
-              height: ${size}px;
-              border-radius: ${Math.random() > 0.5 ? '50%' : '3px'};
+              position: fixed; left: ${10 + Math.random() * 80}vw; top: -20px;
+              width: ${size}px; height: ${size}px; border-radius: ${Math.random() > 0.5 ? '50%' : '3px'};
               background: ${confettiColors[Math.floor(Math.random() * confettiColors.length)]};
-              z-index: 100000;
-              pointer-events: none;
+              z-index: 100000; pointer-events: none;
               animation: confettiFall ${1.8 + Math.random() * 2}s ease-in ${Math.random() * 0.8}s forwards;
             `;
             document.body.appendChild(dot);
             setTimeout(() => dot.remove(), 4500);
           }
 
+          // Render Success Screen
           loadingOverlay.innerHTML = `
             <div style="text-align:center; padding:2.5rem 2rem; max-width:460px; width:90%; animation: popIn 0.5s cubic-bezier(0.34,1.56,0.64,1) both;">
               <div style="width:88px; height:88px; border-radius:50%; background:linear-gradient(135deg,#10b981,#059669); display:flex; align-items:center; justify-content:center; margin:0 auto 1.5rem; font-size:2.5rem; animation: successPulse 2s ease infinite, popIn 0.5s cubic-bezier(0.34,1.56,0.64,1) both; box-shadow: 0 0 0 0 rgba(16,185,129,0.5);">
                 ✓
               </div>
-              <h2 style="color:#fff; font-size:1.7rem; font-weight:900; margin-bottom:0.5rem; letter-spacing:-0.02em;">Order Placed Successfully! 🎉</h2>
-              <p style="color:rgba(255,255,255,0.7); font-size:0.95rem; margin-bottom:1.75rem; line-height:1.6;">Your order <strong style="color:#10b981;">${newOrder.id}</strong> has been submitted. We'll verify your payment and start printing shortly.</p>
+              <h2 style="color:#fff; font-size:1.7rem; font-weight:900; margin-bottom:0.5rem; letter-spacing:-0.02em;">Order Submitted Successfully! 🎉</h2>
+              <p style="color:rgba(255,255,255,0.7); font-size:0.95rem; margin-bottom:1.75rem; line-height:1.6;">
+                Your order <strong style="color:#10b981;">${createdOrder.id}</strong> has been saved. We'll verify your payment and start printing shortly.
+              </p>
+
               <div style="background:rgba(16,185,129,0.12); border:1.5px solid rgba(16,185,129,0.35); border-radius:14px; padding:1rem 1.25rem; margin-bottom:1.5rem; text-align:left;">
                 <div style="display:flex; justify-content:space-between; font-size:0.875rem; margin-bottom:0.45rem;">
                   <span style="color:rgba(255,255,255,0.55);">Order ID</span>
-                  <span style="color:#10b981; font-weight:800;">${newOrder.id}</span>
+                  <span style="color:#10b981; font-weight:800;">${createdOrder.id}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.875rem; margin-bottom:0.45rem;">
-                  <span style="color:rgba(255,255,255,0.55);">Customer</span>
+                  <span style="color:rgba(255,255,255,0.55);">Customer Name</span>
                   <span style="color:#fff; font-weight:600;">${custName}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.875rem; margin-bottom:0.45rem;">
+                  <span style="color:rgba(255,255,255,0.55);">Total Amount</span>
+                  <span style="color:#38bdf8; font-weight:800;">${formatCurrency(createdOrder.pricing?.total)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.875rem;">
                   <span style="color:rgba(255,255,255,0.55);">Payment Status</span>
-                  <span style="background:#f59e0b; color:#000; font-size:0.75rem; font-weight:700; padding:0.15rem 0.55rem; border-radius:8px;">⏳ Waiting Verification</span>
+                  <span style="background:#f59e0b; color:#000; font-size:0.75rem; font-weight:700; padding:0.15rem 0.55rem; border-radius:8px;">⏳ ${createdOrder.paymentStatus || 'Waiting Verification'}</span>
                 </div>
               </div>
-              <div style="display:flex; gap:0.75rem; justify-content:center; flex-wrap:wrap;">
-                <button id="overlay-track-btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1); color:#fff; border:none; border-radius:10px; padding:0.75rem 1.5rem; font-size:0.95rem; font-weight:700; cursor:pointer; box-shadow:0 4px 14px rgba(59,130,246,0.4); transition:transform 0.15s;">
-                  📦 Track My Order
+
+              <div style="display:flex; gap:0.65rem; justify-content:center; flex-wrap:wrap;">
+                <button id="overlay-track-btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1); color:#fff; border:none; border-radius:10px; padding:0.75rem 1.25rem; font-size:0.92rem; font-weight:700; cursor:pointer; box-shadow:0 4px 14px rgba(59,130,246,0.4);">
+                  📦 Track Order
                 </button>
-                <button id="overlay-close-btn" style="background:rgba(255,255,255,0.1); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.75rem 1.25rem; font-size:0.95rem; font-weight:600; cursor:pointer; transition:transform 0.15s;">
-                  ✕ Close
+                <button id="overlay-home-btn" style="background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.75rem 1.1rem; font-size:0.92rem; font-weight:600; cursor:pointer;">
+                  🏠 Back to Home
+                </button>
+                <button id="overlay-contact-btn" style="background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.75rem 1.1rem; font-size:0.92rem; font-weight:600; cursor:pointer;">
+                  📞 Contact Us
                 </button>
               </div>
-              <p style="color:rgba(255,255,255,0.35); font-size:0.78rem; margin-top:1.25rem;">Redirecting to tracking page in <span id="overlay-countdown">5</span>s...</p>
             </div>
           `;
 
-          // Countdown + auto-redirect
-          let countdown = 5;
-          const countdownEl = document.getElementById('overlay-countdown');
-          const countdownTimer = setInterval(() => {
-            countdown--;
-            if (countdownEl) countdownEl.textContent = countdown;
-            if (countdown <= 0) {
-              clearInterval(countdownTimer);
-              loadingOverlay.style.animation = 'fadeOutOverlay 0.35s ease forwards';
-              setTimeout(() => {
-                loadingOverlay.remove();
-                window.location.hash = `#track?id=${newOrder.id}`;
-              }, 350);
-            }
-          }, 1000);
+          const navigateAndClean = (hash) => {
+            if (loadingOverlay) loadingOverlay.remove();
+            window.location.hash = hash;
+          };
 
-          document.getElementById('overlay-track-btn')?.addEventListener('click', () => {
-            clearInterval(countdownTimer);
-            loadingOverlay.style.animation = 'fadeOutOverlay 0.35s ease forwards';
-            setTimeout(() => {
-              loadingOverlay.remove();
-              window.location.hash = `#track?id=${newOrder.id}`;
-            }, 350);
-          });
+          document.getElementById('overlay-track-btn')?.addEventListener('click', () => navigateAndClean(`#track?id=${createdOrder.id}`));
+          document.getElementById('overlay-home-btn')?.addEventListener('click', () => navigateAndClean('#home'));
+          document.getElementById('overlay-contact-btn')?.addEventListener('click', () => navigateAndClean('#contact'));
 
-          document.getElementById('overlay-close-btn')?.addEventListener('click', () => {
-            clearInterval(countdownTimer);
-            loadingOverlay.style.animation = 'fadeOutOverlay 0.35s ease forwards';
-            setTimeout(() => {
-              loadingOverlay.remove();
-              window.location.hash = `#track?id=${newOrder.id}`;
-            }, 350);
-          });
-
-          NotificationService.showToast(`Order ${newOrder.id} submitted successfully!`, 'success');
+          NotificationService.showToast(`Order ${createdOrder.id} submitted successfully!`, 'success');
 
         } catch (err) {
-          console.error('Order creation error:', err);
-          // Remove loading overlay on failure
+          console.error('[ORDER ERROR] Submission failed:', err);
+
           if (loadingOverlay) {
-            loadingOverlay.style.animation = 'fadeOutOverlay 0.3s ease forwards';
-            setTimeout(() => loadingOverlay.remove(), 300);
+            loadingOverlay.remove();
           }
-          NotificationService.showToast('Failed to submit order. Please try again.', 'error');
-          btnSubmit.disabled = false;
-          btnSubmit.innerHTML = originalText;
+
+          const userErrMsg = err?.message || 'Server connection timed out or failed. Please check your internet connection and try again.';
+          NotificationService.showToast(userErrMsg, 'error');
+
+        } finally {
+          // If order creation failed, unlock state & re-enable button for retry
+          if (!isOrderSavedSuccessfully) {
+            isSubmitting = false;
+            btnSubmit.disabled = false;
+            btnSubmit.innerHTML = originalText;
+            if (document.getElementById('order-submit-overlay')) {
+              document.getElementById('order-submit-overlay')?.remove();
+            }
+          }
         }
       };
     }

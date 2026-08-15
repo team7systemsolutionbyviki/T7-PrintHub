@@ -490,19 +490,27 @@ export const StorageService = {
     const { storage, isDemo } = getServices();
     if (!isDemo && storage) {
       try {
-        if (!firebaseStorageModule) {
-          firebaseStorageModule = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js');
-        }
-        const { ref, uploadBytes, getDownloadURL } = firebaseStorageModule;
-        const fileRef = ref(storage, storagePath);
-        await uploadBytes(fileRef, file, {
-          contentType: file.type || 'image/webp',
-          cacheControl: 'public,max-age=31536000'
+        const uploadTask = (async () => {
+          if (!firebaseStorageModule) {
+            firebaseStorageModule = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js');
+          }
+          const { ref, uploadBytes, getDownloadURL } = firebaseStorageModule;
+          const fileRef = ref(storage, storagePath);
+          await uploadBytes(fileRef, file, {
+            contentType: file.type || 'image/webp',
+            cacheControl: 'public,max-age=31536000'
+          });
+          const url = await getDownloadURL(fileRef);
+          return { url, downloadURL: url, storagePath, name: file.name, idbKey };
+        })();
+
+        const timeoutTask = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Firebase Storage upload timed out after 12 seconds.')), 12000);
         });
-        const url = await getDownloadURL(fileRef);
-        return { url, downloadURL: url, storagePath, name: file.name, idbKey };
+
+        return await Promise.race([uploadTask, timeoutTask]);
       } catch (e) {
-        console.warn('[PAYMENT PROOF] Firebase upload failed:', e);
+        console.warn('[PAYMENT PROOF] Firebase upload failed or timed out:', e);
         throw new Error('Payment proof upload failed: ' + (e.message || 'Firebase Storage error'));
       }
     }
