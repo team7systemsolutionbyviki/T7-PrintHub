@@ -2,8 +2,7 @@
    TEAM 7 SYSTEM SOLUTION - PUBLIC VIEWS MODULE
    ========================================================================== */
 
-import { DEFAULT_SERVICES, FAQS, DEFAULT_ABOUT_PAGE } from '../config/default-data.js';
-import { T7_SHOP_CATEGORIES, T7_SHOP_ITEMS } from '../config/shop-data.js';
+import { DEFAULT_SERVICES, FAQS } from '../config/default-data.js';
 import { AuthService } from '../services/auth-service.js';
 import { DBService } from '../services/db-service.js';
 import { PricingEngine } from '../services/pricing-engine.js';
@@ -37,9 +36,7 @@ function renderStationeryShowcase(products, settings, compact = false) {
             return `
               <div class="service-card" style="position:relative;">
                 ${p.popular ? '<span class="badge badge-approved" style="position:absolute;top:1rem;right:1rem;font-size:0.7rem;">Popular</span>' : ''}
-                ${p.imageUrl
-                  ? `<div style="height:190px;margin:-.25rem -.25rem 1rem;overflow:hidden;border-radius:10px;background:var(--bg-body);"><img src="${p.imageUrl}" alt="${p.name || 'Product'}" loading="lazy" style="width:100%;height:100%;object-fit:cover;"></div>`
-                  : `<div class="service-icon">${p.icon || '📦'}</div>`}
+                <div class="service-icon">${p.icon || '📦'}</div>
                 <div style="margin-bottom:0.4rem;"><span class="badge badge-waiting" style="font-size:0.7rem;">${p.category || 'Accessory'}</span></div>
                 <h3 style="margin-bottom:0.5rem;font-size:1.2rem;">${p.name}</h3>
                 <p class="text-muted" style="font-size:0.88rem;flex:1;margin-bottom:1rem;">${p.description || ''}</p>
@@ -92,18 +89,7 @@ export const PublicViews = {
     // Always load the Firestore-backed catalog before rendering.
     // This prevents the Home page from briefly/incorrectly using DEFAULT_SERVICES
     // after a fresh page refresh.
-    // Never block the Home page waiting indefinitely for Firebase.
-    // If Firestore is slow/offline, render immediately with the built-in defaults.
-    let catalog = [];
-    try {
-      catalog = await Promise.race([
-        DBService.getServicesCatalog(),
-        new Promise(resolve => setTimeout(() => resolve([]), 4000))
-      ]);
-    } catch (e) {
-      console.warn('[HOME] Catalog unavailable; using defaults:', e);
-      catalog = [];
-    }
+    const catalog = await DBService.getServicesCatalog();
     const activeServices = (catalog || []).filter(s => s.status !== 'Inactive');
     const displayServices = activeServices.length > 0 ? activeServices : DEFAULT_SERVICES;
     const products = DBService.getProductsCatalogSync();
@@ -360,16 +346,8 @@ export const PublicViews = {
   // --- SERVICES PAGE ---
   async renderServices() {
     // Load the latest Firestore-backed catalog before rendering the Services page.
-    let catalog = [];
-    try {
-      catalog = await Promise.race([
-        DBService.getServicesCatalog(),
-        new Promise(resolve => setTimeout(() => resolve(DBService.getServicesCatalogSync()), 1000))
-      ]);
-    } catch (e) {
-      catalog = DBService.getServicesCatalogSync();
-    }
-    const activeServices = (catalog || []).filter(s => s.status !== 'Inactive');
+    const catalog = await DBService.getServicesCatalog();
+    const activeServices = catalog.filter(s => s.status !== 'Inactive');
     const products = DBService.getProductsCatalogSync();
     const isAdmin = AuthService.isAdmin();
 
@@ -489,10 +467,7 @@ export const PublicViews = {
     // Only active + in-stock products are offered as optional order add-ons.
     let orderProducts = [];
     try {
-      const catalog = await Promise.race([
-        DBService.getProductsCatalog(),
-        new Promise(resolve => setTimeout(() => resolve(DBService.getProductsCatalogSync()), 1000))
-      ]);
+      const catalog = await DBService.getProductsCatalog();
       orderProducts = (catalog || []).filter(p => p && String(p.status || 'Active').toLowerCase() === 'active' && String(p.stockStatus || 'In Stock').toLowerCase() === 'in stock');
     } catch (err) {
       console.warn('Optional product catalog could not be loaded:', err);
@@ -600,16 +575,17 @@ export const PublicViews = {
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">Delivery Method *</label>
+                  <label class="form-label">${I18nService.t('delivery_zone_label')}</label>
                   <select class="form-select" id="cust-delivery-zone" style="font-weight:600; color:var(--primary);">
-                    <option value="Pickup">Store Pickup — Free</option>
-                    <option value="HomeDelivery">Home Delivery</option>
+                    ${Object.entries(pricing.deliveryZones || {}).map(([key, item]) => `
+                      <option value="${key}">${item.label}</option>
+                    `).join('')}
                   </select>
                 </div>
 
-                <div class="form-group" id="delivery-address-group" style="display:none;">
-                  <label class="form-label">Delivery Address *</label>
-                  <textarea class="form-control" id="cust-address" placeholder="Enter your complete home delivery address"></textarea>
+                <div class="form-group">
+                  <label class="form-label">${I18nService.t('delivery_address_label')}</label>
+                  <textarea class="form-control" id="cust-address" placeholder="Enter full address if requesting doorstep delivery"></textarea>
                 </div>
 
                 <div id="order-products-section" style="margin-top:1.25rem; padding:1.25rem; background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px;">
@@ -682,11 +658,7 @@ export const PublicViews = {
 
                   <div class="form-group">
                     <label class="form-label">${I18nService.t('screenshot_label')}</label>
-                    <input type="file" class="form-control" id="pay-screenshot" accept="image/jpeg,image/png,image/webp,image/jpg">
-                    <div id="pay-screenshot-preview-container" style="display:none; margin-top:0.75rem; text-align:center; background:var(--primary-light); padding:0.75rem; border-radius:10px; border:1px solid var(--border-color);">
-                      <img id="pay-screenshot-img-preview" src="" alt="Payment Proof Preview" style="max-width:100%; max-height:180px; border-radius:8px; border:1.5px solid var(--primary); object-fit:contain; display:inline-block;" />
-                      <span style="display:block; font-size:0.75rem; color:var(--text-muted); margin-top:0.35rem; font-weight:600;">🖼️ Payment Proof Preview (Ready to submit)</span>
-                    </div>
+                    <input type="file" class="form-control" id="pay-screenshot" accept="image/*">
                   </div>
 
                   <div class="flex justify-between mt-4">
@@ -928,6 +900,7 @@ export const PublicViews = {
       // Pickup remains free. The selected zone controls the delivery area,
       // while courierPricing controls the actual weight charge:
       // first 1 kg = ₹60, every additional 500 g = ₹40.
+      const deliveryZoneConfig = (pricing.deliveryZones || {})[selectedZoneKey] || { fee: 0 };
       const isPickup = selectedZoneKey === 'Pickup';
       const deliveryFee = isPickup ? 0 : courierWeight.courierCost;
       const internalCourierCost = deliveryFee;
@@ -1085,29 +1058,8 @@ export const PublicViews = {
     }
 
     const deliverySelect = document.getElementById('cust-delivery-zone');
-    const deliveryAddressGroup = document.getElementById('delivery-address-group');
-    const deliveryAddress = document.getElementById('cust-address');
-
-    const updateDeliveryMethodUI = () => {
-      const isHomeDelivery = deliverySelect?.value === 'HomeDelivery';
-
-      if (deliveryAddressGroup) {
-        deliveryAddressGroup.style.display = isHomeDelivery ? '' : 'none';
-      }
-
-      if (deliveryAddress) {
-        deliveryAddress.required = isHomeDelivery;
-        if (!isHomeDelivery) {
-          deliveryAddress.value = '';
-        }
-      }
-
-      updateCalculations();
-    };
-
     if (deliverySelect) {
-      deliverySelect.onchange = updateDeliveryMethodUI;
-      updateDeliveryMethodUI();
+      deliverySelect.onchange = () => updateCalculations();
     }
 
     const setStep = (stepNum) => {
@@ -1437,10 +1389,7 @@ export const PublicViews = {
                 <label class="form-label" style="font-size:0.78rem; font-weight:700; color:var(--primary);">
                   📄 Pages to Print (Doc Total: ${f.pages} pgs)
                 </label>
-                <input type="text" id="page-range-${idx}" class="form-control" style="font-size:0.82rem;" placeholder="E.g., 1-${f.pages} or 1, 3, 5-20" value="${f.options.pageRange !== undefined ? f.options.pageRange : `1-${f.pages}`}" oninput="window.updateFileOption(${idx},'pageRange',this.value)">
-                <span id="page-range-error-${idx}" style="font-size:0.7rem; color:#dc2626; margin-top:0.2rem; display:${f.options.pageRange && !PricingEngine.validatePageRange(f.options.pageRange, f.pages, true).valid ? 'block' : 'none'};">
-                  ${f.options.pageRange ? PricingEngine.validatePageRange(f.options.pageRange, f.pages, true).message : ''}
-                </span>
+                <input type="text" class="form-control" style="font-size:0.82rem;" placeholder="E.g., 1-${f.pages} or 1, 3, 5-20" value="${f.options.pageRange !== undefined ? f.options.pageRange : `1-${f.pages}`}" oninput="window.updateFileOption(${idx},'pageRange',this.value)">
                 <span style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem; display:block;">
                   Enter page ranges to print (e.g. <code>1-${f.pages}</code> or <code>1-50</code>).
                 </span>
@@ -1450,15 +1399,7 @@ export const PublicViews = {
                 <label class="form-label" style="font-size:0.78rem; font-weight:700; color:${f.options.colorMode === 'Custom Split' ? '#10b981' : 'var(--text-main)'};">
                   🎨 Color Page Numbers / Ranges
                 </label>
-                <div style="display:flex; gap:0.4rem; align-items:center; margin-bottom:0.4rem; flex-wrap:wrap;">
-                  <button type="button" class="btn btn-sm btn-outline" style="font-size:0.7rem; padding:0.3rem 0.55rem;" onclick="window.setAllColorPages(${idx})" ${f.options.colorMode === 'Color + B&W Copies' ? 'disabled' : ''}>🎨 All Color</button>
-                  <button type="button" class="btn btn-sm btn-outline" style="font-size:0.7rem; padding:0.3rem 0.55rem;" onclick="window.setAllBWPages(${idx})" ${f.options.colorMode === 'Color + B&W Copies' ? 'disabled' : ''}>⬛ All B&amp;W</button>
-                  <span style="font-size:0.68rem; color:var(--text-muted);">Quick select</span>
-                </div>
-                <input type="text" id="color-range-${idx}" class="form-control" style="font-size:0.82rem; ${f.options.colorMode === 'Custom Split' ? 'border-color:#10b981; box-shadow:0 0 0 2px rgba(16,185,129,0.2);' : ''}" placeholder="${f.options.colorMode === 'Color' ? 'All pages are Full Color' : f.options.colorMode === 'Black & White' ? 'All pages are Black & White' : f.options.colorMode === 'Color + B&W Copies' ? 'Not needed for Mixed Copies' : 'E.g., 1, 5, 10-15'}" value="${f.options.colorMode === 'Color + B&W Copies' ? '' : (f.options.colorPageRange || '')}" ${f.options.colorMode === 'Color + B&W Copies' ? 'disabled' : ''} oninput="window.updateFileOption(${idx},'colorPageRange',this.value)">
-                <span id="color-range-error-${idx}" style="font-size:0.7rem; color:#dc2626; margin-top:0.2rem; display:${f.options.colorMode === 'Custom Split' && f.options.colorPageRange && !PricingEngine.validatePageRange(f.options.colorPageRange, f.pages, true).valid ? 'block' : 'none'};">
-                  ${f.options.colorMode === 'Custom Split' && f.options.colorPageRange ? PricingEngine.validatePageRange(f.options.colorPageRange, f.pages, true).message : ''}
-                </span>
+                <input type="text" class="form-control" style="font-size:0.82rem; ${f.options.colorMode === 'Custom Split' ? 'border-color:#10b981; box-shadow:0 0 0 2px rgba(16,185,129,0.2);' : ''}" placeholder="${f.options.colorMode === 'Color' ? 'All pages are Full Color' : f.options.colorMode === 'Black & White' ? 'All pages are Black & White' : f.options.colorMode === 'Color + B&W Copies' ? 'Not needed for Mixed Copies' : 'E.g., 1, 5, 10-15'}" value="${f.options.colorMode === 'Color + B&W Copies' ? '' : (f.options.colorPageRange || '')}" ${f.options.colorMode === 'Color + B&W Copies' ? 'disabled' : ''} oninput="window.updateFileOption(${idx},'colorPageRange',this.value)">
                 <span style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem; display:block;">
                   ${f.options.colorMode === 'Color + B&W Copies'
                     ? 'Not required — the whole document is printed in both Color and B&amp;W.'
@@ -1568,44 +1509,15 @@ export const PublicViews = {
       }
     };
 
-    window.setAllColorPages = (idx) => {
-      const f = state.files[idx];
-      if (!f) return;
-      f.options.colorMode = 'Custom Split';
-      f.options.colorPageRange = `1-${f.pages}`;
-      renderFileList();
-      updateCalculations();
-    };
-
-    window.setAllBWPages = (idx) => {
-      const f = state.files[idx];
-      if (!f) return;
-      f.options.colorMode = 'Custom Split';
-      f.options.colorPageRange = '';
-      renderFileList();
-      updateCalculations();
-    };
-
     window.updateFileOption = (idx, key, value) => {
       if (state.files[idx]) {
         state.files[idx].options[key] = value;
 
-        // Auto switch colorMode to Custom Split if typing in colorPageRange.
+        // Auto switch colorMode to Custom Split if typing in colorPageRange
         if (key === 'colorPageRange' && value.trim() !== '' && state.files[idx].options.colorMode !== 'Custom Split') {
           state.files[idx].options.colorMode = 'Custom Split';
           const selectEls = document.querySelectorAll(`#file-options-${idx} select`);
           if (selectEls && selectEls[2]) selectEls[2].value = 'Custom Split';
-        }
-
-        // Validate page ranges immediately without forcing a full re-render while typing.
-        if (key === 'pageRange' || key === 'colorPageRange') {
-          const maxPages = Math.max(1, Number(state.files[idx].pages) || 1);
-          const validation = PricingEngine.validatePageRange(String(value || ''), maxPages, true);
-          const errorEl = document.getElementById(key === 'colorPageRange' ? `color-range-error-${idx}` : `page-range-error-${idx}`);
-          if (errorEl) {
-            errorEl.textContent = validation.message;
-            errorEl.style.display = validation.valid ? 'none' : 'block';
-          }
         }
 
         // Re-render this file when switching print mode so the correct copy inputs appear.
@@ -1650,22 +1562,6 @@ export const PublicViews = {
       updateCalculations();
     };
 
-    const validateAllFileRanges = () => {
-      for (let i = 0; i < state.files.length; i++) {
-        const f = state.files[i];
-        const pageValidation = PricingEngine.validatePageRange(f.options.pageRange ?? `1-${f.pages}`, f.pages, true);
-        const colorValidation = PricingEngine.validatePageRange(f.options.colorPageRange ?? '', f.pages, true);
-        if (!pageValidation.valid || !colorValidation.valid) {
-          const message = pageValidation.valid ? colorValidation.message : pageValidation.message;
-          NotificationService.showToast(`Please fix page ranges in ${f.name}: ${message}`, 'warning');
-          const panel = document.getElementById(`file-options-${i}`);
-          if (panel && panel.style.display === 'none') window.toggleFileOptions(i);
-          return false;
-        }
-      }
-      return true;
-    };
-
     // Step Navigation Event Handlers
     const btnToStep2 = document.getElementById('btn-to-step-2');
     if (btnToStep2) {
@@ -1674,7 +1570,6 @@ export const PublicViews = {
           NotificationService.showToast('Please upload at least one PDF document before continuing to Contact Details.', 'warning');
           return;
         }
-        if (!validateAllFileRanges()) return;
         updateCalculations();
         setStep(2);
       };
@@ -1694,19 +1589,10 @@ export const PublicViews = {
           return;
         }
 
-        const deliveryMethod = document.getElementById('cust-delivery-zone')?.value || 'Pickup';
-        const deliveryAddressValue = document.getElementById('cust-address')?.value.trim() || '';
-        if (deliveryMethod === 'HomeDelivery' && !deliveryAddressValue) {
-          NotificationService.showToast('Please enter your Home Delivery Address.', 'warning');
-          document.getElementById('cust-address')?.focus();
-          return;
-        }
-
         state.customer.name = name;
         state.customer.phone = phone;
         state.customer.email = document.getElementById('cust-email')?.value.trim() || '';
         state.customer.address = document.getElementById('cust-address')?.value.trim() || '';
-        if (!validateAllFileRanges()) return;
         updateCalculations();
         setStep(3);
       };
@@ -1743,14 +1629,6 @@ export const PublicViews = {
           setStep(2);
           return;
         }
-        const deliveryMethod = document.getElementById('cust-delivery-zone')?.value || 'Pickup';
-        const deliveryAddressValue = document.getElementById('cust-address')?.value.trim() || '';
-        if (deliveryMethod === 'HomeDelivery' && !deliveryAddressValue) {
-          NotificationService.showToast('Please enter your Home Delivery Address.', 'warning');
-          setStep(2);
-          document.getElementById('cust-address')?.focus();
-          return;
-        }
         updateCalculations();
         setStep(3);
       };
@@ -1758,85 +1636,10 @@ export const PublicViews = {
 
     // Per-file options update via global helpers (already handled inline via window.updateFileOption)
 
-    document.getElementById('pay-screenshot')?.addEventListener('change', async (e) => {
-      const file = e.target.files?.[0];
-      const container = document.getElementById('pay-screenshot-preview-container');
-      const img = document.getElementById('pay-screenshot-img-preview');
-
-      if (!file) {
-        if (container) container.style.display = 'none';
-        return;
-      }
-      const type = String(file.type || '').toLowerCase();
-      if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(file.name || '')) {
-        NotificationService.showToast('Invalid file format: Payment proof must be JPG, JPEG, PNG, or WEBP.', 'error');
-        e.target.value = '';
-        if (container) container.style.display = 'none';
-        return;
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        NotificationService.showToast('Payment proof image size must be 5MB or smaller.', 'error');
-        e.target.value = '';
-        if (container) container.style.display = 'none';
-        return;
-      }
-
-      try {
-        const comp = await StorageService.compressImage(file, 1600, 0.80);
-        const localUrl = URL.createObjectURL(comp.blob);
-        if (img) img.src = localUrl;
-
-        let infoLabel = container?.querySelector('.screenshot-size-info');
-        if (!infoLabel && container) {
-          infoLabel = document.createElement('div');
-          infoLabel.className = 'screenshot-size-info';
-          infoLabel.style.cssText = 'font-size:0.78rem; color:var(--text-muted); margin-top:0.4rem; font-weight:600;';
-          container.appendChild(infoLabel);
-        }
-        if (infoLabel) {
-          infoLabel.innerHTML = `🖼️ <b>Payment Screenshot Preview</b> • Original: <b>${StorageService.formatBytes(comp.originalSize)}</b> → Compressed: <b style="color:#10b981;">${StorageService.formatBytes(comp.compressedSize)}</b>`;
-        }
-        if (container) container.style.display = 'block';
-      } catch (err) {
-        console.warn('Payment proof preview failed:', err);
-      }
-    });
-
     // Submit Order
     const btnSubmit = document.getElementById('btn-submit-final-order');
     if (btnSubmit) {
-      let isSubmitting = false;
-
-      const withTimeout = (promise, timeoutMs = 15000, operationName = 'Operation') => {
-        return new Promise((resolve, reject) => {
-          const timer = setTimeout(() => {
-            reject(new Error(`${operationName} timed out after ${Math.round(timeoutMs / 1000)} seconds. Please check your internet connection and try again.`));
-          }, timeoutMs);
-
-          promise
-            .then(res => {
-              clearTimeout(timer);
-              resolve(res);
-            })
-            .catch(err => {
-              clearTimeout(timer);
-              reject(err);
-            });
-        });
-      };
-
       btnSubmit.onclick = async () => {
-        if (isSubmitting) {
-          console.warn('[ORDER] Submission already in progress. Ignoring click.');
-          return;
-        }
-
-        // Offline / connectivity check
-        if (!navigator.onLine) {
-          NotificationService.showToast('Internet connection is unavailable. Please check your network and try again.', 'error');
-          return;
-        }
-
         const utr = document.getElementById('pay-utr')?.value.trim() || '';
         const payerName = document.getElementById('pay-name')?.value.trim() || '';
         const screenshotInput = document.getElementById('pay-screenshot');
@@ -1858,14 +1661,6 @@ export const PublicViews = {
           return;
         }
 
-        const finalDeliveryMethod = document.getElementById('cust-delivery-zone')?.value || 'Pickup';
-        if (finalDeliveryMethod === 'HomeDelivery' && !custAddress) {
-          NotificationService.showToast('Please enter your Home Delivery Address.', 'warning');
-          setStep(2);
-          document.getElementById('cust-address')?.focus();
-          return;
-        }
-
         if (!utr || utr.length < 6) {
           NotificationService.showToast('Please enter a valid 12-digit UTR / UPI Ref Number.', 'warning');
           document.getElementById('pay-utr')?.focus();
@@ -1878,15 +1673,9 @@ export const PublicViews = {
           return;
         }
 
-        isSubmitting = true;
-        btnSubmit.disabled = true;
         const originalText = btnSubmit.innerHTML;
+        btnSubmit.disabled = true;
         btnSubmit.innerHTML = '⏳ Submitting...';
-
-        console.log('[ORDER] Submission started');
-
-        // Pre-generate unique order ID
-        const uniqueOrderId = 'ORD-' + new Date().getFullYear() + '-' + Math.floor(100000 + Math.random() * 900000);
 
         // Show Full-Screen Loading Overlay
         let loadingOverlay = document.getElementById('order-submit-overlay');
@@ -1897,11 +1686,12 @@ export const PublicViews = {
         }
         loadingOverlay.style.cssText = `
           position: fixed; inset: 0; z-index: 99999;
-          background: rgba(10, 10, 20, 0.92);
-          backdrop-filter: blur(12px);
+          background: rgba(10, 10, 20, 0.88);
+          backdrop-filter: blur(10px);
           display: flex; align-items: center; justify-content: center;
           animation: fadeInOverlay 0.35s ease;
         `;
+        // Inject keyframes if not already present
         if (!document.getElementById('overlay-anim-style')) {
           const style = document.createElement('style');
           style.id = 'overlay-anim-style';
@@ -1909,7 +1699,7 @@ export const PublicViews = {
             @keyframes fadeInOverlay { from { opacity: 0; } to { opacity: 1; } }
             @keyframes fadeOutOverlay { from { opacity: 1; } to { opacity: 0; } }
             @keyframes spinRing { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-            @keyframes popIn { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); } }
+            @keyframes popIn { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); } }
             @keyframes successPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); } 50% { box-shadow: 0 0 0 22px rgba(16,185,129,0); } }
             @keyframes confettiFall {
               0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
@@ -1918,167 +1708,60 @@ export const PublicViews = {
           `;
           document.head.appendChild(style);
         }
-
-        const updateProgressUI = (activeStepIndex, statusMessage, failedStepIndex = 0, failedStepMessage = '') => {
-          const steps = [
-            'Validating order',
-            'Saving payment details',
-            'Uploading payment proof',
-            'Saving order',
-            'Sending confirmation',
-            'Completed'
-          ];
-
-          let stepsHTML = '';
-          steps.forEach((stepName, idx) => {
-            const stepNum = idx + 1;
-            let icon = '<span style="color:rgba(255,255,255,0.3); font-weight:600;">○</span>';
-            let textColor = 'color:rgba(255,255,255,0.5);';
-
-            if (failedStepIndex && stepNum === failedStepIndex) {
-              icon = '<span style="color:#ef4444; font-weight:800;">✕</span>';
-              textColor = 'color:#f87171; font-weight:700;';
-            } else if (stepNum < activeStepIndex || (activeStepIndex === 6 && stepNum <= 6)) {
-              icon = '<span style="color:#10b981; font-weight:800;">✓</span>';
-              textColor = 'color:rgba(255,255,255,0.85); font-weight:600;';
-            } else if (stepNum === activeStepIndex) {
-              icon = '<span style="width:8px; height:8px; border-radius:50%; background:#3b82f6; display:inline-block; animation: spinRing 1s linear infinite;"></span>';
-              textColor = 'color:#38bdf8; font-weight:700;';
-            }
-
-            const nameToDisplay = (failedStepIndex && stepNum === failedStepIndex && failedStepMessage)
-              ? failedStepMessage
-              : stepName;
-
-            stepsHTML += `
-              <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.45rem;">
-                <div style="width:16px; text-align:center;">${icon}</div>
-                <span style="${textColor} font-size:0.85rem;">${nameToDisplay}</span>
-              </div>
-            `;
-          });
-
-          loadingOverlay.innerHTML = `
-            <div style="text-align:center; padding:2.25rem; max-width:440px; width:90%;">
-              <div style="position:relative; width:80px; height:80px; margin:0 auto 1.25rem;">
-                <div style="position:absolute; inset:0; border-radius:50%; border:4px solid rgba(255,255,255,0.1);"></div>
-                <div style="position:absolute; inset:0; border-radius:50%; border:4px solid transparent; border-top-color:#3b82f6; border-right-color:#8b5cf6; animation: spinRing 1.1s linear infinite;"></div>
-                <div style="position:absolute; inset:10px; border-radius:50%; border:3px solid transparent; border-bottom-color:#10b981; animation: spinRing 0.75s linear infinite reverse;"></div>
-                <div style="position:absolute; inset:18px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#8b5cf6); display:flex; align-items:center; justify-content:center; font-size:1.25rem;">🖨️</div>
-              </div>
-              <h3 style="color:#fff; font-size:1.35rem; font-weight:800; margin-bottom:0.4rem;">${failedStepIndex ? 'Unable to Place Your Order' : 'Submitting Your Order...'}</h3>
-              <p style="color:rgba(255,255,255,0.65); font-size:0.88rem; line-height:1.5; margin-bottom:1.25rem;">${statusMessage || 'Processing your request...'}</p>
-              <div style="background:rgba(255,255,255,0.06); border-radius:14px; padding:1rem 1.25rem; border:1px solid rgba(255,255,255,0.12); text-align:left; margin-bottom:${failedStepIndex ? '1.25rem' : '0'};">
-                ${stepsHTML}
-              </div>
-              ${failedStepIndex ? `
-                <div style="display:flex; gap:0.65rem; justify-content:center; margin-top:1.25rem;">
-                  <button id="overlay-retry-btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1); color:#fff; border:none; border-radius:10px; padding:0.65rem 1.25rem; font-size:0.9rem; font-weight:700; cursor:pointer;">
-                    🔄 Try Again
-                  </button>
-                  <button id="overlay-cancel-btn" style="background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.65rem 1.1rem; font-size:0.9rem; font-weight:600; cursor:pointer;">
-                    ✕ Cancel
-                  </button>
-                </div>
-              ` : ''}
+        loadingOverlay.innerHTML = `
+          <div style="text-align:center; padding:2.5rem; max-width:420px; width:90%;">
+            <div style="position:relative; width:90px; height:90px; margin:0 auto 1.75rem;">
+              <div style="position:absolute; inset:0; border-radius:50%; border:4px solid rgba(255,255,255,0.1);"></div>
+              <div style="position:absolute; inset:0; border-radius:50%; border:4px solid transparent; border-top-color:#3b82f6; border-right-color:#8b5cf6; animation: spinRing 1.1s linear infinite;"></div>
+              <div style="position:absolute; inset:10px; border-radius:50%; border:3px solid transparent; border-bottom-color:#10b981; animation: spinRing 0.75s linear infinite reverse;"></div>
+              <div style="position:absolute; inset:22px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#8b5cf6); display:flex; align-items:center; justify-content:center; font-size:1.35rem;">🖨️</div>
             </div>
-          `;
-
-          if (failedStepIndex) {
-            document.getElementById('overlay-retry-btn')?.addEventListener('click', () => {
-              if (loadingOverlay) loadingOverlay.remove();
-              btnSubmit.disabled = false;
-              btnSubmit.innerHTML = originalText;
-              isSubmitting = false;
-              btnSubmit.click();
-            });
-            document.getElementById('overlay-cancel-btn')?.addEventListener('click', () => {
-              if (loadingOverlay) loadingOverlay.remove();
-              btnSubmit.disabled = false;
-              btnSubmit.innerHTML = originalText;
-              isSubmitting = false;
-            });
-          }
-        };
-
-        let isOrderSavedSuccessfully = false;
-        let createdOrder = null;
+            <h3 style="color:#fff; font-size:1.45rem; font-weight:800; margin-bottom:0.6rem; letter-spacing:-0.01em;">Submitting Your Order...</h3>
+            <p style="color:rgba(255,255,255,0.65); font-size:0.92rem; line-height:1.6; margin-bottom:1.5rem;">Processing payment details &amp; uploading your order to our system. Please wait...</p>
+            <div style="background:rgba(255,255,255,0.07); border-radius:12px; padding:0.85rem 1.25rem; border:1px solid rgba(255,255,255,0.12);">
+              <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.45rem;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#3b82f6; display:inline-block; animation: spinRing 1s linear infinite;"></span>
+                <span style="color:rgba(255,255,255,0.75); font-size:0.82rem; font-weight:600;">Saving payment details</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.45rem;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#8b5cf6; display:inline-block; animation: spinRing 1.3s linear infinite;"></span>
+                <span style="color:rgba(255,255,255,0.75); font-size:0.82rem; font-weight:600;">Syncing order to cloud database</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:0.6rem;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#10b981; display:inline-block; animation: spinRing 0.9s linear infinite;"></span>
+                <span style="color:rgba(255,255,255,0.75); font-size:0.82rem; font-weight:600;">Sending confirmation notification</span>
+              </div>
+            </div>
+          </div>
+        `;
 
         try {
-          // STEP 1: Validating order
-          console.log('[ORDER] Validation started');
-          updateProgressUI(1, 'Validating order details and file options...');
-          await new Promise(r => setTimeout(r, 150));
-          console.log('[ORDER] Validation completed');
-
-          // STEP 2: Saving payment details
-          console.log('[ORDER] Payment save started');
-          updateProgressUI(2, 'Processing payment details...');
-          await new Promise(r => setTimeout(r, 150));
-          console.log('[ORDER] Payment save completed');
-
-          // STEP 3: Direct Payment Proof Upload to Firebase Storage SDK
-          let paymentProofObj = null;
-
-          const screenshotFile = screenshotInput && screenshotInput.files && screenshotInput.files[0];
-          if (screenshotFile) {
-            console.log('[ORDER] Payment screenshot upload started');
-            updateProgressUI(3, 'Compressing & uploading payment screenshot...');
-
-            const type = String(screenshotFile.type || '').toLowerCase();
-            if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(screenshotFile.name || '')) {
-              updateProgressUI(3, 'Invalid file format', 3, '✕ Payment screenshot format error');
-              throw new Error('Payment screenshot upload failed. Only JPG, JPEG, PNG, and WEBP images are allowed.');
-            }
-            if (screenshotFile.size > 5 * 1024 * 1024) {
-              updateProgressUI(3, 'Image size > 5MB', 3, '✕ Payment screenshot size > 5MB');
-              throw new Error('Payment screenshot upload failed. Image file size must be 5MB or smaller.');
-            }
-
+          let screenshotUrl = '';
+          let screenshotIdbKey = '';
+          let screenshotDataUrl = '';
+          if (screenshotInput && screenshotInput.files && screenshotInput.files[0]) {
             try {
-              paymentProofObj = await StorageService.uploadPaymentProof(screenshotFile, uniqueOrderId, (progress) => {
-                updateProgressUI(3, `Uploading payment screenshot (${progress}%)...`);
-              });
-              console.log('[ORDER] Direct Storage upload completed:', paymentProofObj.storagePath);
-            } catch (imgErr) {
-              console.error('[ORDER ERROR] Payment screenshot upload failed:', imgErr);
-              updateProgressUI(3, 'Payment screenshot upload failed', 3, '✕ Payment screenshot upload failed');
-              throw new Error('Payment screenshot upload failed. Please try again.');
+              const screenshotFile = screenshotInput.files[0];
+              screenshotDataUrl = await StorageService.readFileAsDataURL(screenshotFile);
+              const uploaded = await StorageService.uploadFile(screenshotFile, 'receipts');
+              screenshotUrl = uploaded.url || screenshotDataUrl || '';
+              screenshotIdbKey = uploaded.idbKey || '';
+            } catch (err) {
+              console.warn('Screenshot processing failed, proceeding with dataUrl:', err);
             }
-          } else {
-            console.log('[ORDER] No payment screenshot attached. Skipping step 3.');
-            updateProgressUI(3, 'No payment proof attached (skipping upload)...');
-            await new Promise(r => setTimeout(r, 100));
           }
-
-          // STEP 4: Save order to Firestore
-          console.log('[ORDER] Firestore order save started');
-          updateProgressUI(4, 'Saving order to cloud database...');
 
           const quote = updateCalculations();
 
-          const orderPayload = {
-            id: uniqueOrderId,
-            orderId: uniqueOrderId,
+          const newOrder = await DBService.createOrder({
             customerName: custName,
-            phone: custPhone,
             customerPhone: custPhone,
-            email: custEmail,
             customerEmail: custEmail,
             customerAddress: custAddress,
-            documents: state.files.map(f => ({
-              fileName: f.name,
-              fileType: f.type || 'application/pdf',
-              fileSize: f.size,
-              storagePath: f.storagePath || '',
-              downloadURL: f.downloadURL || f.url || '',
-              pages: f.pages,
-              options: f.options
-            })),
             files: state.files.map(f => ({
               name: f.name,
               size: f.size,
-              url: f.url || f.downloadURL || '',
+              url: f.url,
               dataUrl: f.dataUrl || '',
               idbKey: f.idbKey || '',
               storagePath: f.storagePath || '',
@@ -2087,32 +1770,7 @@ export const PublicViews = {
               pages: f.pages,
               options: f.options
             })),
-            printing: {
-              colorPages: quote.colorPagesCount || 0,
-              bwPages: quote.bwPagesCount || 0,
-              colorRanges: state.files.map(f => f.options?.colorPageRange || '').filter(Boolean).join('; ') || 'None',
-              bwRanges: state.files.map(f => f.options?.pageRange || '').filter(Boolean).join('; ') || 'All',
-              totalPages: (quote.totalColorPrints || 0) + (quote.totalBWPrints || 0),
-              copies: state.files[0]?.options?.copies || 1,
-              paperSize: state.files[0]?.options?.paperSize || 'A4',
-              paperQuality: state.files[0]?.options?.paperQuality || '70 GSM',
-              orientation: state.files[0]?.options?.orientation || 'Portrait',
-              printSide: state.files[0]?.options?.printSide || 'Single',
-              sides: state.files[0]?.options?.printSide || 'Single',
-              binding: Array.from(new Set(state.files.map(f => f.options?.binding).filter(b => b && b !== 'None'))).join(', ') || 'None',
-              finishing: state.files.some(f => f.options?.lamination === 'Yes') ? 'Lamination' : 'None'
-            },
-            accessories: getSelectedProducts().map(p => ({
-              id: p.id,
-              name: p.name,
-              category: p.category || '',
-              icon: p.icon || '🛍️',
-              price: Number(p.price) || 0,
-              quantity: p.quantity,
-              weightGrams: Number(p.weightGrams) || 0,
-              packagingWeightGrams: Number(p.packagingWeightGrams) || 0,
-              subtotal: (Number(p.price) || 0) * p.quantity
-            })),
+            options: state.files.length > 0 ? state.files[0].options : {},
             products: getSelectedProducts().map(p => ({
               id: p.id,
               name: p.name,
@@ -2124,162 +1782,149 @@ export const PublicViews = {
               packagingWeightGrams: Number(p.packagingWeightGrams) || 0,
               subtotal: (Number(p.price) || 0) * p.quantity
             })),
-            packageWeight: {
+            pricing: quote,
+            printing: {
+              paperSize: state.files[0]?.options?.paperSize || 'A4',
+              gsm: state.files[0]?.options?.paperQuality || '70 GSM',
+              colorPages: quote.colorPagesCount || 0,
+              colorCopies: quote.colorCopies || state.files[0]?.options?.colorCopies || state.files[0]?.options?.copies || 1,
+              colorRate: quote.colorPaperRate || 6.00,
+              colorAmount: quote.colorCost || 0,
+              totalColorPrints: quote.totalColorPrints || 0,
+              bwPages: quote.bwPagesCount || 0,
+              bwCopies: quote.bwCopies || state.files[0]?.options?.bwCopies || state.files[0]?.options?.copies || 1,
+              bwRate: quote.basePaperRate || 1.50,
+              bwAmount: quote.paperCost || 0,
+              totalBWPrints: quote.totalBWPrints || 0,
+              totalPrints: (quote.totalColorPrints || 0) + (quote.totalBWPrints || 0),
+              sides: state.files[0]?.options?.printSide || 'Single',
+              binding: Array.from(new Set(state.files.map(f => f.options?.binding).filter(b => b && b !== 'None'))).join(', ') || 'None',
+              lamination: state.files.some(f => f.options?.lamination === 'Yes') ? 'Yes' : 'None'
+            },
+            package: {
               weightKg: quote.packageWeightKg || 0,
               weightGrams: quote.packageWeightGrams || 0,
               printWeightGrams: quote.printWeightGrams || 0,
               productWeightGrams: quote.productWeightGrams || 0,
               bindingWeightGrams: quote.bindingWeightGrams || 0,
-              packagingWeightGrams: quote.packagingWeightGrams || 0
+              packagingWeightGrams: quote.packagingWeightGrams || 0,
+              courierName: settings.courierPricing?.courierName || 'ST Courier',
+              courierCost: quote.internalCourierCost || 0,
+              customerDeliveryCharge: 0,
+              deliveryType: quote.deliveryType || 'FREE'
             },
-            delivery: {
-              type: quote.deliveryType || 'PICKUP',
-              charge: quote.deliveryFee || 0,
-              address: custAddress,
-              deliveryZone: quote.deliveryZone || 'Pickup'
-            },
-            subtotal: quote.total - (quote.deliveryFee || 0),
-            deliveryCharge: quote.deliveryFee || 0,
-            grandTotal: quote.total,
-            pricing: quote,
-            paymentProof: paymentProofObj ? {
-              uploaded: true,
-              storagePath: paymentProofObj.storagePath,
-              downloadURL: paymentProofObj.downloadURL || paymentProofObj.url,
-              fileName: paymentProofObj.fileName,
-              fileSize: paymentProofObj.fileSize,
-              uploadedAt: paymentProofObj.uploadedAt || new Date().toISOString()
-            } : null,
-            paymentScreenshotUrl: paymentProofObj?.downloadURL || paymentProofObj?.url || '',
-            paymentScreenshotStoragePath: paymentProofObj?.storagePath || '',
             payment: {
-              status: paymentProofObj ? 'Proof Submitted' : 'Waiting Verification',
               method: 'UPI QR',
-              amount: quote.total,
               utr: utr,
               payerName: payerName,
-              screenshotUrl: paymentProofObj?.downloadURL || paymentProofObj?.url || '',
-              screenshotStoragePath: paymentProofObj?.storagePath || '',
-              paymentProof: paymentProofObj || null
-            },
-            paymentStatus: paymentProofObj ? 'Proof Submitted' : 'Waiting Verification',
-            status: 'Waiting Verification',
-            orderStatus: 'Waiting Verification',
-            createdAt: new Date().toISOString()
-          };
-
-          console.log('[ORDER] Final order payload:', orderPayload);
-
-          try {
-            const createOrderPromise = DBService.createOrder(orderPayload);
-            createdOrder = await withTimeout(createOrderPromise, 15000, 'Firestore order save');
-            isOrderSavedSuccessfully = true;
-            console.log('[ORDER] Firestore order save completed:', createdOrder.id);
-          } catch (dbErr) {
-            console.error('[ORDER ERROR] Firestore save failed:', dbErr);
-            updateProgressUI(4, 'Firestore save failed', 4, '✕ Saving order failed');
-            throw new Error('Order could not be saved. Please check your internet connection and try again.');
-          }
-
-          // STEP 5: Non-blocking Notification Dispatch
-          console.log('[ORDER] Notification started');
-          updateProgressUI(5, 'Sending confirmation notification...');
-
-          (async () => {
-            try {
-              if (window.WhatsAppService?.sendOrderConfirmation) {
-                await window.WhatsAppService.sendOrderConfirmation(createdOrder);
-              }
-              console.log('[ORDER] Notification completed');
-            } catch (notifErr) {
-              console.warn('[ORDER WARNING] Background notification failed:', notifErr);
+              screenshotUrl: screenshotUrl || screenshotDataUrl,
+              screenshotDataUrl: screenshotDataUrl,
+              screenshotIdbKey: screenshotIdbKey,
+              status: 'Waiting Verification'
             }
-          })();
+          });
 
-          // STEP 6: Order Completed & Success Screen (Rendered ONLY after Firestore save confirmed!)
-          console.log('[ORDER] Submission completed');
-          updateProgressUI(6, 'Order completed successfully!');
-
-          // Spawn Confetti Particles
+          // === SUCCESS SCREEN ===
+          // Spawn confetti particles
           const confettiColors = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
           for (let c = 0; c < 36; c++) {
             const dot = document.createElement('div');
             const size = 8 + Math.random() * 10;
             dot.style.cssText = `
-              position: fixed; left: ${10 + Math.random() * 80}vw; top: -20px;
-              width: ${size}px; height: ${size}px; border-radius: ${Math.random() > 0.5 ? '50%' : '3px'};
+              position: fixed;
+              left: ${10 + Math.random() * 80}vw;
+              top: -20px;
+              width: ${size}px;
+              height: ${size}px;
+              border-radius: ${Math.random() > 0.5 ? '50%' : '3px'};
               background: ${confettiColors[Math.floor(Math.random() * confettiColors.length)]};
-              z-index: 100000; pointer-events: none;
+              z-index: 100000;
+              pointer-events: none;
               animation: confettiFall ${1.8 + Math.random() * 2}s ease-in ${Math.random() * 0.8}s forwards;
             `;
             document.body.appendChild(dot);
             setTimeout(() => dot.remove(), 4500);
           }
 
-          // Render Success Screen
           loadingOverlay.innerHTML = `
             <div style="text-align:center; padding:2.5rem 2rem; max-width:460px; width:90%; animation: popIn 0.5s cubic-bezier(0.34,1.56,0.64,1) both;">
               <div style="width:88px; height:88px; border-radius:50%; background:linear-gradient(135deg,#10b981,#059669); display:flex; align-items:center; justify-content:center; margin:0 auto 1.5rem; font-size:2.5rem; animation: successPulse 2s ease infinite, popIn 0.5s cubic-bezier(0.34,1.56,0.64,1) both; box-shadow: 0 0 0 0 rgba(16,185,129,0.5);">
                 ✓
               </div>
               <h2 style="color:#fff; font-size:1.7rem; font-weight:900; margin-bottom:0.5rem; letter-spacing:-0.02em;">Order Placed Successfully! 🎉</h2>
-              <p style="color:rgba(255,255,255,0.7); font-size:0.95rem; margin-bottom:1.75rem; line-height:1.6;">
-                Your order <strong style="color:#10b981;">${createdOrder.id}</strong> has been saved to our database. We'll verify your payment and start printing shortly.
-              </p>
-
+              <p style="color:rgba(255,255,255,0.7); font-size:0.95rem; margin-bottom:1.75rem; line-height:1.6;">Your order <strong style="color:#10b981;">${newOrder.id}</strong> has been submitted. We'll verify your payment and start printing shortly.</p>
               <div style="background:rgba(16,185,129,0.12); border:1.5px solid rgba(16,185,129,0.35); border-radius:14px; padding:1rem 1.25rem; margin-bottom:1.5rem; text-align:left;">
                 <div style="display:flex; justify-content:space-between; font-size:0.875rem; margin-bottom:0.45rem;">
                   <span style="color:rgba(255,255,255,0.55);">Order ID</span>
-                  <span style="color:#10b981; font-weight:800;">${createdOrder.id}</span>
+                  <span style="color:#10b981; font-weight:800;">${newOrder.id}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.875rem; margin-bottom:0.45rem;">
-                  <span style="color:rgba(255,255,255,0.55);">Customer Name</span>
+                  <span style="color:rgba(255,255,255,0.55);">Customer</span>
                   <span style="color:#fff; font-weight:600;">${custName}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; font-size:0.875rem; margin-bottom:0.45rem;">
-                  <span style="color:rgba(255,255,255,0.55);">Total Amount</span>
-                  <span style="color:#38bdf8; font-weight:800;">${formatCurrency(createdOrder.grandTotal || createdOrder.pricing?.total)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.875rem;">
                   <span style="color:rgba(255,255,255,0.55);">Payment Status</span>
-                  <span style="background:#f59e0b; color:#000; font-size:0.75rem; font-weight:700; padding:0.15rem 0.55rem; border-radius:8px;">⏳ ${createdOrder.paymentStatus || 'Waiting Verification'}</span>
+                  <span style="background:#f59e0b; color:#000; font-size:0.75rem; font-weight:700; padding:0.15rem 0.55rem; border-radius:8px;">⏳ Waiting Verification</span>
                 </div>
               </div>
-
-              <div style="display:flex; gap:0.65rem; justify-content:center; flex-wrap:wrap;">
-                <button id="overlay-track-btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1); color:#fff; border:none; border-radius:10px; padding:0.75rem 1.4rem; font-size:0.92rem; font-weight:700; cursor:pointer; box-shadow:0 4px 14px rgba(59,130,246,0.4);">
-                  📦 Track Order
+              <div style="display:flex; gap:0.75rem; justify-content:center; flex-wrap:wrap;">
+                <button id="overlay-track-btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1); color:#fff; border:none; border-radius:10px; padding:0.75rem 1.5rem; font-size:0.95rem; font-weight:700; cursor:pointer; box-shadow:0 4px 14px rgba(59,130,246,0.4); transition:transform 0.15s;">
+                  📦 Track My Order
                 </button>
-                <button id="overlay-home-btn" style="background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.75rem 1.25rem; font-size:0.92rem; font-weight:600; cursor:pointer;">
-                  🏠 Back to Home
+                <button id="overlay-close-btn" style="background:rgba(255,255,255,0.1); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.75rem 1.25rem; font-size:0.95rem; font-weight:600; cursor:pointer; transition:transform 0.15s;">
+                  ✕ Close
                 </button>
               </div>
+              <p style="color:rgba(255,255,255,0.35); font-size:0.78rem; margin-top:1.25rem;">Redirecting to tracking page in <span id="overlay-countdown">5</span>s...</p>
             </div>
           `;
 
-          const navigateAndClean = (hash) => {
-            if (loadingOverlay) loadingOverlay.remove();
-            window.location.hash = hash;
-          };
+          // Countdown + auto-redirect
+          let countdown = 5;
+          const countdownEl = document.getElementById('overlay-countdown');
+          const countdownTimer = setInterval(() => {
+            countdown--;
+            if (countdownEl) countdownEl.textContent = countdown;
+            if (countdown <= 0) {
+              clearInterval(countdownTimer);
+              loadingOverlay.style.animation = 'fadeOutOverlay 0.35s ease forwards';
+              setTimeout(() => {
+                loadingOverlay.remove();
+                window.location.hash = `#track?id=${newOrder.id}`;
+              }, 350);
+            }
+          }, 1000);
 
-          document.getElementById('overlay-track-btn')?.addEventListener('click', () => navigateAndClean(`#track?id=${createdOrder.id}`));
-          document.getElementById('overlay-home-btn')?.addEventListener('click', () => navigateAndClean('#home'));
+          document.getElementById('overlay-track-btn')?.addEventListener('click', () => {
+            clearInterval(countdownTimer);
+            loadingOverlay.style.animation = 'fadeOutOverlay 0.35s ease forwards';
+            setTimeout(() => {
+              loadingOverlay.remove();
+              window.location.hash = `#track?id=${newOrder.id}`;
+            }, 350);
+          });
 
-          NotificationService.showToast(`Order ${createdOrder.id} submitted successfully!`, 'success');
+          document.getElementById('overlay-close-btn')?.addEventListener('click', () => {
+            clearInterval(countdownTimer);
+            loadingOverlay.style.animation = 'fadeOutOverlay 0.35s ease forwards';
+            setTimeout(() => {
+              loadingOverlay.remove();
+              window.location.hash = `#track?id=${newOrder.id}`;
+            }, 350);
+          });
+
+          NotificationService.showToast(`Order ${newOrder.id} submitted successfully!`, 'success');
 
         } catch (err) {
-          console.error('[ORDER ERROR] Submission failed:', err);
-
-          const userErrMsg = err?.message || 'Server connection timed out or failed. Please check your internet connection and try again.';
-          NotificationService.showToast(userErrMsg, 'error');
-
-        } finally {
-          // If order creation failed before Firestore save, unlock state & re-enable button for retry
-          if (!isOrderSavedSuccessfully) {
-            isSubmitting = false;
-            btnSubmit.disabled = false;
-            btnSubmit.innerHTML = originalText;
+          console.error('Order creation error:', err);
+          // Remove loading overlay on failure
+          if (loadingOverlay) {
+            loadingOverlay.style.animation = 'fadeOutOverlay 0.3s ease forwards';
+            setTimeout(() => loadingOverlay.remove(), 300);
           }
+          NotificationService.showToast('Failed to submit order. Please try again.', 'error');
+          btnSubmit.disabled = false;
+          btnSubmit.innerHTML = originalText;
         }
       };
     }
@@ -2294,15 +1939,7 @@ export const PublicViews = {
     const app = document.getElementById('app-content');
     const params = new URLSearchParams(queryStr);
     const serviceId = params.get('serviceId') || '';
-    let catalog = [];
-    try {
-      catalog = await Promise.race([
-        DBService.getServicesCatalog(),
-        new Promise(resolve => setTimeout(() => resolve(DBService.getServicesCatalogSync()), 1000))
-      ]);
-    } catch (e) {
-      catalog = DBService.getServicesCatalogSync();
-    }
+    const catalog = await DBService.getServicesCatalog();
     const service = (catalog || []).find(s => String(s.id) === serviceId) || null;
 
     if (!service || service.status === 'Inactive') {
@@ -2487,229 +2124,6 @@ export const PublicViews = {
 
       const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(messageLines.join('\\n'))}`;
       window.open(waUrl, '_blank', 'noopener');
-    };
-  },
-
-  // --- SEPARATE T7 SHOP ---
-  async renderShop(queryStr = '') {
-    const app = document.getElementById('app-content');
-    if (!app) return;
-    const settings = DBService.getSettingsSync();
-    const rawWa = String(settings.whatsappNumber || settings.phone || '').replace(/\D/g, '');
-    const wa = rawWa.length === 10 ? '91' + rawWa : rawWa;
-    const params = new URLSearchParams(queryStr);
-    const initialCategory = params.get('category') || 'all';
-     let shopProducts = [], shopServices = [];
-     try {
-       [shopProducts, shopServices] = await Promise.race([
-         Promise.all([
-           DBService.getProductsCatalog(),
-           DBService.getServicesCatalog()
-         ]),
-         new Promise(resolve => setTimeout(() => resolve([
-           DBService.getProductsCatalogSync(),
-           DBService.getServicesCatalogSync()
-         ]), 1000))
-       ]);
-     } catch (err) {
-       console.warn('[SHOP] Catalog fetch error, using sync cache:', err);
-       shopProducts = DBService.getProductsCatalogSync();
-       shopServices = DBService.getServicesCatalogSync();
-     }
-     const dynamicItems = [
-       ...(shopProducts || []).filter(p => p.status !== 'Inactive' && p.t7ShopEnabled).map(p => ({
-         id:p.id, category:p.t7ShopCategory || 'amd', title:p.name || 'Product', icon:p.icon || '📦',
-         description:p.description || 'T7 Shop product',
-         price:Number(p.price)>0 ? `₹${Number(p.price).toFixed(2)}` : 'Price on request',
-         action:p.t7ShopAction || 'enquiry',
-         imageUrl:p.imageUrl || ''
-       })),
-       ...(shopServices || []).filter(s => s.status !== 'Inactive' && s.t7ShopEnabled).map(s => ({
-         id:s.id, category:s.t7ShopCategory || 'services', title:s.title || 'Service', icon:s.icon || '🛠️',
-         description:s.description || 'T7 Shop service', price:s.startingPrice || 'Price on request',
-         action:s.t7ShopAction || 'service'
-       }))
-     ];
-     const shopItems = [...T7_SHOP_ITEMS, ...dynamicItems];
-
-    app.innerHTML = `
-      <section class="t7-shop-page" style="padding:3rem 0 5rem;">
-        <div class="container">
-          <div class="glass-panel" style="padding:2rem; margin-bottom:1.5rem; overflow:hidden; position:relative;">
-            <div style="position:absolute;right:-70px;top:-90px;width:240px;height:240px;border-radius:50%;background:var(--primary-glow);filter:blur(10px);"></div>
-            <div style="position:relative;z-index:1;">
-              <span class="badge badge-approved">🛍️ T7 SHOP</span>
-              <h1 style="font-size:2.6rem;margin:.6rem 0;">Sales, Services, Design & Driver Booking</h1>
-              <p class="text-muted" style="max-width:800px;font-size:1rem;">
-                Buy laptops and PCs, choose AMD components and accessories, book computer services,
-                order flex/visiting-card/poster/photo work, or book a driver with or without a car.
-              </p>
-              <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:1.25rem;">
-                <a href="#shop?category=computers" class="btn btn-primary">💻 Computers</a>
-                <a href="#shop?category=design" class="btn btn-secondary">🎨 Design & Print</a>
-                <a href="#shop?category=driver" class="btn btn-secondary">🚗 Driver Booking</a>
-              </div>
-            </div>
-          </div>
-
-          <div class="t7-shop-category-grid" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.75rem;margin-bottom:1.5rem;">
-            <button class="btn btn-outline shop-filter-btn" data-shop-category="all">🛍️ All</button>
-            ${T7_SHOP_CATEGORIES.map(c => `
-              <button class="btn btn-outline shop-filter-btn" data-shop-category="${c.id}">${c.icon} ${c.title}</button>
-            `).join('')}
-          </div>
-
-          <div id="t7-shop-grid" class="services-grid">
-            ${shopItems.map(item => `
-              <article class="service-card t7-shop-item" data-shop-item-category="${item.category}" style="position:relative;">
-                ${item.imageUrl
-                  ? `<div style="height:190px;margin:-.25rem -.25rem 1rem;overflow:hidden;border-radius:10px;background:var(--bg-body);"><img src="${item.imageUrl}" alt="${item.title}" loading="lazy" style="width:100%;height:100%;object-fit:cover;"></div>`
-                  : `<div class="service-icon">${item.icon}</div>`}
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
-                  <span class="badge badge-waiting" style="font-size:.7rem;">${T7_SHOP_CATEGORIES.find(c=>c.id===item.category)?.title || 'Shop'}</span>
-                </div>
-                <h3 style="margin:.7rem 0 .5rem;">${item.title}</h3>
-                <p class="text-muted" style="font-size:.88rem;flex:1;">${item.description}</p>
-                <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;gap:.75rem;">
-                  <strong style="color:var(--primary);">${item.price}</strong>
-                  ${item.action === 'driver'
-                    ? `<button class="btn btn-primary btn-sm shop-driver-btn" data-driver-type="${item.id}">Book Now</button>`
-                    : item.action === 'service'
-                      ? `<button class="btn btn-primary btn-sm shop-service-btn" data-shop-service="${item.title}">Book / Enquire</button>`
-                      : `<button class="btn btn-primary btn-sm shop-buy-btn" data-shop-product="${item.title}">Buy / Enquire</button>`}
-                </div>
-              </article>
-            `).join('')}
-          </div>
-
-          <div id="t7-shop-booking-panel" class="glass-panel" style="display:none;padding:1.5rem;margin-top:2rem;">
-            <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;">
-              <div>
-                <h2 id="t7-shop-booking-title" style="margin:0;">Booking</h2>
-                <p class="text-muted" style="margin:.35rem 0 0;">Enter your details. The request will open in WhatsApp for confirmation.</p>
-              </div>
-              <button type="button" class="btn btn-outline btn-sm" id="t7-shop-booking-close">✕ Close</button>
-            </div>
-            <form id="t7-shop-booking-form" style="margin-top:1.25rem;">
-              <input type="hidden" id="t7-shop-request-type">
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;">
-                <div class="form-group"><label class="form-label">Name *</label><input class="form-control" id="shop-book-name" required></div>
-                <div class="form-group"><label class="form-label">Mobile *</label><input class="form-control" id="shop-book-phone" required inputmode="tel"></div>
-                <div class="form-group"><label class="form-label">Preferred Date</label><input class="form-control" id="shop-book-date" type="date"></div>
-                <div class="form-group"><label class="form-label">Preferred Time</label><input class="form-control" id="shop-book-time" type="time"></div>
-              </div>
-              <div id="t7-driver-fields" style="display:none;">
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;">
-                  <div class="form-group"><label class="form-label">Driver Booking</label><select class="form-select" id="shop-driver-mode"><option value="Driver With Car">Driver With Car</option><option value="Driver Without Car">Driver Without Car</option></select></div>
-                  <div class="form-group"><label class="form-label">Duration</label><input class="form-control" id="shop-driver-duration" placeholder="e.g. 4 hours / 1 day"></div>
-                  <div class="form-group"><label class="form-label">Pickup Location *</label><input class="form-control" id="shop-driver-pickup"></div>
-                  <div class="form-group"><label class="form-label">Drop / Route</label><input class="form-control" id="shop-driver-drop"></div>
-                </div>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Requirement / Product Details</label>
-                <textarea class="form-control" id="shop-book-details" rows="4" placeholder="Laptop model, PC specification, flex size, card quantity, poster size, photo-frame size, service problem, etc."></textarea>
-              </div>
-              <button class="btn btn-primary btn-lg" type="submit" style="width:100%;">📲 Send Request on WhatsApp</button>
-            </form>
-          </div>
-        </div>
-      </section>
-    `;
-
-    const filterButtons = app.querySelectorAll('.shop-filter-btn');
-    const items = app.querySelectorAll('.t7-shop-item');
-    const applyFilter = (cat) => {
-      items.forEach(el => {
-        el.style.display = (cat === 'all' || el.dataset.shopItemCategory === cat) ? '' : 'none';
-      });
-      filterButtons.forEach(btn => btn.classList.toggle('btn-primary', btn.dataset.shopCategory === cat));
-    };
-    filterButtons.forEach(btn => btn.addEventListener('click', () => {
-      const cat = btn.dataset.shopCategory;
-      applyFilter(cat);
-      history.replaceState(null, '', `#shop${cat === 'all' ? '' : '?category=' + encodeURIComponent(cat)}`);
-    }));
-    applyFilter(initialCategory);
-
-    const panel = document.getElementById('t7-shop-booking-panel');
-    const form = document.getElementById('t7-shop-booking-form');
-    const titleEl = document.getElementById('t7-shop-booking-title');
-    const requestType = document.getElementById('t7-shop-request-type');
-    const driverFields = document.getElementById('t7-driver-fields');
-
-    const openBooking = (type, title) => {
-      panel.style.display = '';
-      titleEl.textContent = title;
-      requestType.value = type;
-      driverFields.style.display = type === 'driver' ? '' : 'none';
-      if (type === 'driver') {
-        const select = document.getElementById('shop-driver-mode');
-        select.value = title.includes('Without') ? 'Driver Without Car' : 'Driver With Car';
-      }
-      panel.scrollIntoView({ behavior:'smooth', block:'start' });
-    };
-
-    app.querySelectorAll('.shop-driver-btn').forEach(btn => btn.addEventListener('click', () => {
-      openBooking('driver', btn.dataset.driverType === 'driver-without-car' ? 'Driver Without Car' : 'Driver With Car');
-    }));
-    app.querySelectorAll('.shop-service-btn').forEach(btn => btn.addEventListener('click', () => openBooking('service', btn.dataset.shopService)));
-    app.querySelectorAll('.shop-buy-btn').forEach(btn => btn.addEventListener('click', () => openBooking('product', btn.dataset.shopProduct)));
-    document.getElementById('t7-shop-booking-close').onclick = () => { panel.style.display = 'none'; };
-
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      const get = id => document.getElementById(id)?.value?.trim() || '';
-      const name = get('shop-book-name'), phone = get('shop-book-phone');
-      if (!name || !phone) {
-        NotificationService.showToast('Please enter your name and mobile number.', 'warning');
-        return;
-      }
-      const type = get('t7-shop-request-type');
-      const lines = [
-        `T7 SHOP REQUEST`,
-        `Type: ${type === 'driver' ? 'Driver Booking' : type === 'product' ? 'Product / Sales Enquiry' : 'Service / Design Request'}`,
-        `Item / Service: ${titleEl.textContent}`,
-        `Customer: ${name}`,
-        `Mobile: ${phone}`,
-        `Preferred Date: ${get('shop-book-date') || 'Not specified'}`,
-        `Preferred Time: ${get('shop-book-time') || 'Not specified'}`
-      ];
-      if (type === 'driver') {
-        lines.push(
-          `Driver Type: ${get('shop-driver-mode')}`,
-          `Duration: ${get('shop-driver-duration') || 'Not specified'}`,
-          `Pickup: ${get('shop-driver-pickup') || 'Not specified'}`,
-          `Drop / Route: ${get('shop-driver-drop') || 'Not specified'}`
-        );
-      }
-      lines.push(`Details: ${get('shop-book-details') || 'Not specified'}`);
-      try {
-        await DBService.saveBookingRequest({
-          type,
-          itemService: titleEl.textContent,
-          customerName: name,
-          customerPhone: phone,
-          preferredDate: get('shop-book-date'),
-          preferredTime: get('shop-book-time'),
-          driverType: type === 'driver' ? get('shop-driver-mode') : '',
-          duration: type === 'driver' ? get('shop-driver-duration') : '',
-          pickup: type === 'driver' ? get('shop-driver-pickup') : '',
-          dropRoute: type === 'driver' ? get('shop-driver-drop') : '',
-          details: get('shop-book-details'),
-          source: 'T7 Shop',
-          status: 'New'
-        });
-      } catch (err) {
-        console.error('[T7 SHOP] Booking save failed:', err);
-        NotificationService.showToast('Booking could not be saved. Please try again.', 'error');
-        return;
-      }
-      if (!wa) {
-        NotificationService.showToast('Shop WhatsApp number is not configured.', 'warning');
-        return;
-      }
-      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank', 'noopener');
     };
   },
 
@@ -3097,134 +2511,5 @@ export const PublicViews = {
         </div>
       </section>
     `;
-  },
-
-  // --- ABOUT T7 PRINT HUB ---
-  renderAboutHTML(aboutData = {}) {
-    const data = {
-      ...DEFAULT_ABOUT_PAGE,
-      ...aboutData,
-      creator: { ...DEFAULT_ABOUT_PAGE.creator, ...(aboutData.creator || {}) },
-      contact: { ...DEFAULT_ABOUT_PAGE.contact, ...(aboutData.contact || {}) },
-      socialLinks: { ...DEFAULT_ABOUT_PAGE.socialLinks, ...(aboutData.socialLinks || {}) },
-      services: Array.isArray(aboutData.services) && aboutData.services.length > 0 ? aboutData.services : DEFAULT_ABOUT_PAGE.services,
-      steps: Array.isArray(aboutData.steps) && aboutData.steps.length > 0 ? aboutData.steps : DEFAULT_ABOUT_PAGE.steps
-    };
-
-    const c = data.creator || {};
-    const defaultAvatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%233b82f6"><circle cx="50" cy="35" r="22"/><path d="M15,88 C15,65 30,55 50,55 C70,55 85,65 85,88 Z"/></svg>`;
-    let rawImg = (c.imageUrl && typeof c.imageUrl === 'string') ? c.imageUrl.trim() : '';
-    if (rawImg.includes('object-fit:') || rawImg.includes('border-radius:') || rawImg.includes('<style')) {
-      rawImg = '';
-    }
-    const creatorAvatarUrl = rawImg ? rawImg : defaultAvatarSvg;
-    const cleanWa = (c.whatsapp || c.phone || '').replace(/\D/g, '');
-    const waLink = cleanWa ? `https://wa.me/${cleanWa.length === 10 ? '91' + cleanWa : cleanWa}?text=${encodeURIComponent('Hi Vignesh! I have an inquiry from T7 Print Hub.')}` : '#contact';
-    const telLink = c.phone ? `tel:${c.phone}` : '#contact';
-
-    const activeServices = data.services.filter(s => s.enabled !== false);
-    const activeSteps = data.steps.filter(s => s.enabled !== false);
-
-    return `
-      <section style="padding:4rem 0 5rem;">
-        <div class="container" style="max-width:1100px;">
-          <!-- Title & Header -->
-          <div class="text-center mb-5">
-            <span class="badge badge-primary">${data.title || 'ABOUT T7 PRINT HUB'}</span>
-            <h1 style="font-size:clamp(2rem,5vw,3.4rem);margin:.8rem 0 1rem;">${data.subtitle || 'Your Local Digital Printing & Service Hub'}</h1>
-            <p class="text-muted" style="max-width:760px;margin:auto;font-size:1.05rem;line-height:1.8;">
-              ${data.description}
-            </p>
-          </div>
-
-          <!-- Creator Section -->
-          ${c.enabled !== false ? `
-            <div class="glass-panel about-creator-card" style="padding:2rem;margin-bottom:2.5rem;border-radius:18px;background:var(--bg-card);border:1px solid var(--border-color);box-shadow:var(--shadow-md);">
-              <div class="about-creator-card-content" style="display:flex;gap:2rem;align-items:center;flex-wrap:wrap;justify-content:center;">
-                <div class="about-creator-image-wrapper">
-                  <img
-                    id="about-creator-image"
-                    class="about-creator-image"
-                    src="${creatorAvatarUrl}"
-                    alt="Created by Vignesh"
-                    onerror="this.onerror=null;this.src='${defaultAvatarSvg}';"
-                  />
-                </div>
-                <div style="flex:1;min-width:260px;">
-                  <span class="badge badge-approved" style="font-size:0.75rem;margin-bottom:0.4rem;">${c.role || 'Developer & Creator'}</span>
-                  <h2 style="margin:0.2rem 0 0.5rem;font-size:1.6rem;color:var(--text-main);">${c.heading || 'This App Was Created by Vignesh'}</h2>
-                  <p class="text-muted" style="margin:0;line-height:1.7;font-size:0.95rem;">
-                    ${c.description}
-                  </p>
-                  <div class="about-creator-buttons" style="display:flex;gap:0.85rem;flex-wrap:wrap;margin-top:1.25rem;">
-                    <a href="${telLink}" class="btn btn-primary" style="display:inline-flex;align-items:center;gap:0.4rem;">${c.callBtnText || `📞 Contact ${c.name} — ${c.phone}`}</a>
-                    <a href="${waLink}" target="_blank" rel="noopener" class="btn btn-success" style="display:inline-flex;align-items:center;gap:0.4rem;background:#10b981;border-color:#10b981;color:white;">${c.whatsappBtnText || '💬 WhatsApp Vignesh'}</a>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ` : ''}
-
-          <!-- Services Showcase -->
-          ${activeServices.length > 0 ? `
-            <h2 class="text-center" style="margin:2.5rem 0 1.25rem;">What You Can Use T7 Print Hub For</h2>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1.25rem;">
-              ${activeServices.map(s => `
-                <div class="glass-panel" style="padding:1.5rem;border-radius:14px;">
-                  ${s.imageUrl
-                    ? `<div style="height:140px;margin:-0.5rem -0.5rem 0.85rem;overflow:hidden;border-radius:10px;"><img src="${s.imageUrl}" alt="${s.title}" style="width:100%;height:100%;object-fit:cover;"></div>`
-                    : `<div style="font-size:2.2rem;margin-bottom:0.5rem;">${s.icon || '📄'}</div>`}
-                  <h3 style="margin:0 0 0.4rem;font-size:1.15rem;">${s.title}</h3>
-                  <p class="text-muted" style="font-size:0.88rem;line-height:1.5;margin:0;">${s.description}</p>
-                </div>
-              `).join('')}
-            </div>
-          ` : ''}
-
-          <!-- How It Works Steps -->
-          ${activeSteps.length > 0 ? `
-            <div class="glass-panel" style="padding:2rem;margin-top:2.5rem;border-radius:16px;">
-              <h2 style="margin:0 0 1rem;font-size:1.4rem;">How T7 Print Hub Helps</h2>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.25rem;margin-top:1rem;">
-                ${activeSteps.map(step => `
-                  <div>
-                    <div style="font-weight:800;color:var(--primary);font-size:1rem;margin-bottom:0.25rem;">${step.number || '●'}. ${step.title}</div>
-                    <p class="text-muted" style="font-size:0.88rem;line-height:1.5;margin:0;">${step.description}</p>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-
-          <!-- Contact & Help Footer Section -->
-          <div class="text-center" style="margin-top:3rem;padding-top:2rem;border-top:1px solid var(--border-color);">
-            <h2 style="font-size:1.5rem;margin-bottom:0.5rem;">Need Help?</h2>
-            <p class="text-muted" style="max-width:550px;margin:0 auto 1.25rem;">For app, printing, product or service enquiries, contact the team directly.</p>
-            <div style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;">
-              <a href="${telLink}" class="btn btn-primary">📞 ${c.phone || data.contact?.phone || '9360039283'}</a>
-              <a href="#contact" class="btn btn-outline">✉️ Contact Us</a>
-              <a href="#shop" class="btn btn-outline">🛍️ Visit T7 Shop</a>
-            </div>
-          </div>
-        </div>
-      </section>
-    `;
-  },
-
-  async renderAbout(queryStr = '') {
-    const app = document.getElementById('app-content');
-    if (!app) return;
-
-    let aboutData = DEFAULT_ABOUT_PAGE;
-    try {
-      aboutData = await Promise.race([
-        DBService.getAboutPage(),
-        new Promise(resolve => setTimeout(() => resolve(DBService.getAboutPageSync()), 1000))
-      ]);
-    } catch (e) {
-      aboutData = DBService.getAboutPageSync();
-    }
-
-    app.innerHTML = this.renderAboutHTML(aboutData);
   }
 };

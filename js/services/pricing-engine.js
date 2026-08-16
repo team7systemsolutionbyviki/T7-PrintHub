@@ -49,42 +49,19 @@ export const PricingEngine = {
     for (let part of parts) {
       if (!part) continue;
       if (part.includes('-')) {
-        const pieces = part.split('-');
-        if (pieces.length !== 2) continue;
-        let [start, end] = pieces.map(Number);
-        if (!Number.isInteger(start) || !Number.isInteger(end)) continue;
-        if (start > end) [start, end] = [end, start];
-        if (start < 1 || end > maxPages) continue;
-        for (let p = start; p <= end; p++) pageSet.add(p);
+        let [start, end] = part.split('-').map(Number);
+        if (!isNaN(start) && !isNaN(end)) {
+          if (start > end) [start, end] = [end, start];
+          start = Math.max(1, start);
+          end   = Math.min(maxPages, end);
+          for (let p = start; p <= end; p++) pageSet.add(p);
+        }
       } else {
-        const p = Number(part);
-        if (Number.isInteger(p) && p >= 1 && p <= maxPages) pageSet.add(p);
+        const p = parseInt(part, 10);
+        if (!isNaN(p) && p >= 1 && p <= maxPages) pageSet.add(p);
       }
     }
     return pageSet;
-  },
-
-  validatePageRange(rangeStr, maxPages = 1, allowEmpty = true) {
-    if (rangeStr == null) return { valid: allowEmpty, message: allowEmpty ? '' : 'Enter page numbers or ranges.' };
-    const clean = String(rangeStr).trim();
-    if (!clean) return { valid: allowEmpty, message: allowEmpty ? '' : 'Enter page numbers or ranges.' };
-    if (clean.toLowerCase() === 'all') return { valid: true, message: '' };
-    const invalid = [];
-    const parts = clean.split(/[,;\s]+/).filter(Boolean);
-    for (const part of parts) {
-      if (/^\d+$/.test(part)) {
-        const n = Number(part);
-        if (n < 1 || n > maxPages) invalid.push(part);
-      } else if (/^\d+-\d+$/.test(part)) {
-        const [a, b] = part.split('-').map(Number);
-        if (a < 1 || b < 1 || a > maxPages || b > maxPages || a > b) invalid.push(part);
-      } else {
-        invalid.push(part);
-      }
-    }
-    return invalid.length
-      ? { valid: false, message: `Invalid page range: ${invalid.join(', ')}. Use numbers/ranges from 1-${maxPages}, e.g. 1, 3, 5-8.` }
-      : { valid: true, message: '' };
   },
 
   // ── Quote Calculator ──────────────────────────────────────────────────────

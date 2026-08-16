@@ -13,8 +13,6 @@ import { InvoiceComponent } from '../components/invoice.js';
 import { ModalComponent } from '../components/modal.js';
 import { formatCurrency, getStatusBadgeHTML, formatDate, formatTime } from '../utils/formatters.js';
 import { exportToCSV } from '../utils/export-excel.js';
-import { getServices, initFirebase, firebaseConfig } from '../config/firebase-config.js';
-import { PublicViews } from './public-views.js';
 
 export const AdminViews = {
   // --- ADMIN LOGIN PAGE ---
@@ -102,17 +100,8 @@ export const AdminViews = {
             <a href="#admin-reports" class="sidebar-link ${activeTab === 'reports' ? 'active' : ''}">
               <span class="sidebar-link-icon">📈</span> Reports & Analytics
             </a>
-            <a href="#admin-reports?view=bookings" class="sidebar-link ${activeTab === 'booking-reports' ? 'active' : ''}">
-              <span class="sidebar-link-icon">📅</span> Booking Report
-            </a>
             <a href="#admin-settings" class="sidebar-link ${activeTab === 'settings' ? 'active' : ''}">
               <span class="sidebar-link-icon">⚙️</span> Shop Settings
-            </a>
-            <a href="#admin-about" class="sidebar-link ${activeTab === 'about' ? 'active' : ''}">
-              <span class="sidebar-link-icon">ℹ️</span> About Page Editor
-            </a>
-            <a href="#admin-firebase-diagnostic" class="sidebar-link ${activeTab === 'firebase-diagnostic' ? 'active' : ''}">
-              <span class="sidebar-link-icon">🔥</span> Firebase Diagnostic
             </a>
           </div>
 
@@ -312,18 +301,17 @@ export const AdminViews = {
   // --- ORDERS MANAGEMENT PIPELINE ---
   async renderOrders(queryStr = '') {
     // Load in parallel — both hit in-memory cache after first load
-    const [allOrders, settings] = await Promise.all([
+    const [orders, settings] = await Promise.all([
       DBService.getOrders(),
       DBService.getSettings()
     ]);
-    const orders = allOrders.filter(o => o.deleted !== true);
 
     const paramId = new URLSearchParams(queryStr).get('id') || '';
 
     // Check if viewing single printable invoice
     const paramInvoice = new URLSearchParams(queryStr).get('invoice');
     if (paramInvoice) {
-      const order = allOrders.find(o => o.id === paramInvoice);
+      const order = orders.find(o => o.id === paramInvoice);
       if (order) {
         document.getElementById('app-content').innerHTML = InvoiceComponent.renderHTML(order, settings);
         return;
@@ -335,7 +323,7 @@ export const AdminViews = {
         <div class="table-toolbar" style="flex-direction:column; align-items:stretch; gap:1rem;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
             <div>
-              <h3 style="margin:0;">Order Management Pipeline (<span id="pipeline-total-count">${orders.length}</span> active orders)</h3>
+              <h3 style="margin:0;">Order Management Pipeline (<span id="pipeline-total-count">${orders.length}</span> orders)</h3>
               <p class="text-muted" style="font-size:0.85rem; margin-top:0.25rem;">Live order processing queue & status workflow management</p>
             </div>
             
@@ -375,7 +363,7 @@ export const AdminViews = {
                 <th>Files (${orders.reduce((acc, o) => acc + (o.files?.length || 1), 0)} Total PDFs)</th>
                 <th style="background:rgba(59,130,246,0.1); color:var(--primary); font-weight:800; font-size:0.9rem;">📋 Specs & Copies</th>
                 <th>Amount</th>
-                <th>Payment Proof</th>
+                <th>UTR Payment</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -501,34 +489,8 @@ export const AdminViews = {
                   </td>
                   <td><b>${formatCurrency(o.pricing?.total)}</b></td>
                   <td>
-                    ${(() => {
-                      const pay = o.payment || {};
-                      const proofObj = o.paymentProof || pay.paymentProof || null;
-                      const payStatus = o.paymentStatus || pay.status || (o.status === 'Completed' || o.status === 'Payment Approved' ? 'Verified' : (o.status === 'Rejected' ? 'Rejected' : 'Waiting Verification'));
-                      const proofUrl = proofObj?.downloadURL || pay.screenshotUrl || pay.paymentScreenshotUrl || o.paymentScreenshotUrl || pay.screenshotDataUrl || pay.screenshot || o.screenshotUrl || '';
-                      const hasProof = !!(proofUrl && proofUrl.trim());
-
-                      let statusBadgeHTML = '';
-                      if (payStatus === 'Verified' || o.status === 'Payment Approved' || o.status === 'Completed') {
-                        statusBadgeHTML = `<span class="badge badge-approved" style="font-size:0.72rem;">🟢 Verified</span>`;
-                      } else if (payStatus === 'Rejected' || o.status === 'Rejected') {
-                        statusBadgeHTML = `<span class="badge badge-rejected" style="font-size:0.72rem;">🔴 Rejected</span>`;
-                      } else if (hasProof || payStatus === 'Proof Submitted' || pay.utr) {
-                        statusBadgeHTML = `<span class="badge badge-pending" style="font-size:0.72rem;">🟡 Proof Submitted</span>`;
-                      } else {
-                        statusBadgeHTML = `<span style="font-size:0.72rem; color:var(--text-muted); font-weight:600;">⚪ No Proof</span>`;
-                      }
-
-                      return `
-                        <div>
-                          <div style="margin-bottom:0.25rem;">${statusBadgeHTML}</div>
-                          <div style="font-size:0.75rem; color:var(--text-muted);">UTR: <code style="font-weight:700;">${pay.utr || 'N/A'}</code></div>
-                          ${hasProof
-                            ? `<button class="btn btn-sm btn-outline" style="font-size:0.7rem; padding:0.2rem 0.5rem; margin-top:0.35rem; display:inline-flex; align-items:center; gap:0.25rem;" onclick="window.viewOrderScreenshot('${o.id}')">🖼️ View Screenshot</button>`
-                            : `<span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-top:0.25rem;">No payment proof uploaded</span>`}
-                        </div>
-                      `;
-                    })()}
+                    <code>${o.payment?.utr || 'N/A'}</code><br>
+                    <button class="btn btn-sm btn-outline" style="font-size:0.7rem; padding:0.2rem 0.5rem; margin-top:0.35rem;" onclick="window.viewOrderScreenshot('${o.id}')">🖼️ View Screenshot</button>
                   </td>
                   <td>
                     ${(() => {
@@ -614,13 +576,15 @@ export const AdminViews = {
     }, 6000);
 
     // Global Order Action Helpers
-    window.deleteOrderRecord = async (orderId) => {
-      if (!confirm(`Archive / Delete order "${orderId}"? The order will be removed from Active Orders, but retained in historical reports.`)) return;
+    window.deleteOrderRecord = (orderId) => {
+      if (!confirm(`Delete order "${orderId}"? This cannot be undone.`)) return;
 
+      // Guard: tell the polling timer this ID was deleted so it never re-adds it
       if (!window._deletedOrderIds) window._deletedOrderIds = new Set();
       window._deletedOrderIds.add(orderId);
       if (window._knownOrderIds) window._knownOrderIds.delete(orderId);
 
+      // Instant UI: animate row out
       const row = document.getElementById(`order-row-${orderId}`);
       if (row) {
         row.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
@@ -629,32 +593,15 @@ export const AdminViews = {
         setTimeout(() => { try { row.remove(); } catch(e){} }, 280);
       }
 
-      await DBService.deleteOrder(orderId, 'Admin');
-      NotificationService.showToast(`🗑️ Order ${orderId} moved to archived / deleted orders.`, 'info');
+      // Background: delete from localStorage + cloud
+      DBService.deleteOrder(orderId);
+      NotificationService.showToast(`🗑️ Order ${orderId} deleted!`, 'info');
 
+      // Update count badges
       ['pipeline-total-count', 'count-all'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = Math.max(0, parseInt(el.textContent || '0') - 1);
       });
-    };
-
-    window.restoreOrderRecord = async (orderId) => {
-      if (!confirm(`Restore order "${orderId}" back to Active Orders?`)) return;
-
-      if (window._deletedOrderIds) window._deletedOrderIds.delete(orderId);
-
-      try {
-        await DBService.restoreOrder(orderId);
-        NotificationService.showToast(`✅ Order ${orderId} restored to Active Orders!`, 'success');
-        if (window.location.hash.startsWith('#admin-reports')) {
-          await AdminViews.renderReports();
-        } else {
-          await AdminViews.renderOrders();
-        }
-      } catch (err) {
-        console.error('Failed to restore order:', err);
-        NotificationService.showToast('Failed to restore order: ' + (err.message || 'Error'), 'error');
-      }
     };
     window.downloadOrderFile = async (orderId, fileIndex) => {
       const order = await DBService.getOrderById(orderId);
@@ -813,33 +760,7 @@ export const AdminViews = {
       }
     };
 
-    window.updatePaymentProofStatus = async (orderId, newStatus) => {
-      let rejectionReason = '';
-      if (newStatus === 'Rejected') {
-        const inputReason = prompt('Enter rejection reason (optional):');
-        if (inputReason === null) return; // user cancelled
-        rejectionReason = inputReason.trim();
-      }
-
-      try {
-        await DBService.updatePaymentStatus(orderId, newStatus, rejectionReason);
-        if (window.ModalComponent?.close) window.ModalComponent.close();
-        else document.getElementById('active-modal-overlay')?.remove();
-
-        NotificationService.showToast(newStatus === 'Verified' ? '✅ Payment verified and approved!' : '❌ Payment rejected.', newStatus === 'Verified' ? 'success' : 'info');
-        await AdminViews.renderOrders();
-      } catch (err) {
-        console.error('[ADMIN] Update payment status error:', err);
-        NotificationService.showToast('Failed to update payment status: ' + (err.message || 'Error'), 'error');
-      }
-    };
-
     window.viewOrderScreenshot = async (orderId) => {
-      if (!AuthService.isAdminLoggedIn()) {
-        NotificationService.showToast('Access denied: Admin authentication required to view payment screenshots.', 'error');
-        return;
-      }
-
       const order = await DBService.getOrderById(orderId);
       if (!order) {
         NotificationService.showToast('Order not found', 'error');
@@ -847,119 +768,90 @@ export const AdminViews = {
       }
 
       const pay = order.payment || {};
-      const proofObj = order.paymentProof || pay.paymentProof || null;
-      const payStatus = order.paymentStatus || pay.status || (order.status === 'Completed' || order.status === 'Payment Approved' ? 'Verified' : (order.status === 'Rejected' ? 'Rejected' : 'Waiting Verification'));
+      const possibleUrl = pay.screenshotUrl || pay.screenshotDataUrl || pay.screenshot || order.screenshotUrl || '';
+      const possibleDataUrl = pay.screenshotDataUrl || pay.fallbackData || (possibleUrl.startsWith('data:') ? possibleUrl : '');
+      const possibleIdbKey = pay.screenshotIdbKey || (possibleUrl.startsWith('idb://') ? possibleUrl.replace('idb://', '') : '');
 
-      const rawUrl = proofObj?.downloadURL || pay.screenshotUrl || pay.paymentScreenshotUrl || order.paymentScreenshotUrl || pay.screenshotDataUrl || pay.screenshot || order.screenshotUrl || '';
-      const rawDataUrl = pay.screenshotDataUrl || pay.fallbackData || (rawUrl.startsWith('data:') ? rawUrl : '');
-      const rawIdbKey = pay.screenshotIdbKey || (rawUrl.startsWith('idb://') ? rawUrl.replace('idb://', '') : '');
-
-      const hasRealScreenshot = !!(rawUrl.startsWith('http://') || rawUrl.startsWith('https://') || rawUrl.startsWith('data:image') || rawDataUrl.startsWith('data:image') || rawIdbKey);
-
+      const hasRealScreenshot = (possibleUrl.startsWith('http://') || possibleUrl.startsWith('https://') || possibleUrl.startsWith('data:image') || possibleDataUrl.startsWith('data:image'));
+      
       let screenshotUrl = '';
       if (hasRealScreenshot) {
-        screenshotUrl = await StorageService.getFileUrl({
-          url: rawUrl,
-          dataUrl: rawDataUrl,
-          idbKey: rawIdbKey
+        screenshotUrl = await StorageService.getFileUrl({ 
+          url: possibleUrl, 
+          dataUrl: possibleDataUrl, 
+          idbKey: possibleIdbKey 
         });
-        if (screenshotUrl && (screenshotUrl.startsWith('http://') || screenshotUrl.startsWith('https://'))) {
-          screenshotUrl += (screenshotUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
-        }
       }
 
       let bodyHTML = '';
-      let statusBadgeHTML = '';
-      if (payStatus === 'Verified' || order.status === 'Payment Approved' || order.status === 'Completed') {
-        statusBadgeHTML = `<span class="badge badge-approved" style="font-size:0.85rem;">🟢 Verified</span>`;
-      } else if (payStatus === 'Rejected' || order.status === 'Rejected') {
-        statusBadgeHTML = `<span class="badge badge-rejected" style="font-size:0.85rem;">🔴 Rejected</span>`;
-      } else {
-        statusBadgeHTML = `<span class="badge badge-pending" style="font-size:0.85rem;">🟡 Proof Submitted</span>`;
-      }
 
       if (screenshotUrl && screenshotUrl.trim() !== '') {
         bodyHTML = `
-          <div style="padding:0.5rem;">
-            <!-- Header Metadata Bar -->
-            <div style="background:var(--bg-card); padding:1rem; border-radius:12px; border:1px solid var(--border-color); margin-bottom:1rem;">
-              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.85rem; align-items:center;">
-                <div>
-                  <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Order ID &amp; Customer</div>
-                  <div style="font-size:1.05rem; font-weight:800;">${order.id}</div>
-                  <div style="font-size:0.88rem; font-weight:600; color:var(--text-main);">${order.customerName} (${order.customerPhone || 'N/A'})</div>
-                </div>
-                <div>
-                  <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Total Amount &amp; Status</div>
-                  <div style="font-size:1.25rem; font-weight:800; color:var(--primary);">${formatCurrency(order.pricing?.total || order.totalAmount)}</div>
-                  <div>${statusBadgeHTML}</div>
-                </div>
-                <div>
-                  <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">UPI UTR / Payer Name</div>
-                  <div style="font-size:0.95rem; font-weight:800; font-family:monospace; color:#059669;">${pay.utr || 'N/A'}</div>
-                  <div style="font-size:0.82rem; color:var(--text-muted);">${pay.payerName || order.customerName}</div>
-                </div>
-                <div>
-                  <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Uploaded Date / Time</div>
-                  <div style="font-size:0.85rem; font-weight:600;">${formatDate(order.createdAt)}</div>
-                </div>
-              </div>
-              ${order.rejectionReason ? `
-                <div style="margin-top:0.75rem; padding:0.5rem 0.75rem; background:rgba(239,68,68,0.1); border-radius:6px; border:1px solid rgba(239,68,68,0.3); font-size:0.82rem; color:#dc2626;">
-                  <b>Rejection Reason:</b> ${escapeHtml(order.rejectionReason)}
-                </div>
-              ` : ''}
+          <div style="text-align:center; padding:0.5rem;">
+            <div style="background:var(--bg-card); padding:0.75rem 1rem; border-radius:8px; border:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+              <div>UTR / Ref: <b style="color:var(--primary); font-family:monospace; font-size:1rem;">${pay.utr || 'N/A'}</b></div>
+              <div>Payer Name: <b>${pay.payerName || order.customerName}</b></div>
+            </div>
+            
+            <div style="position:relative; display:inline-block; max-width:100%;">
+              <img src="${screenshotUrl}" alt="Payment Screenshot" style="max-width:100%; max-height:65vh; border-radius:12px; border:1px solid var(--border-color); box-shadow:var(--shadow-md); display:inline-block; object-fit:contain;" 
+                onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'text-center text-muted\\' style=\\'padding:2rem;\\'>⚠️ Screenshot preview unavailable on this device.<br><a href=\\'${screenshotUrl}\\' target=\\'_blank\\' class=\\'btn btn-sm btn-primary mt-2\\'>Open Screenshot Link ↗</a></div>';" />
             </div>
 
-            <!-- Full Screenshot Viewer -->
-            <div style="text-align:center; background:#0f172a; padding:1.25rem; border-radius:14px; border:1px solid var(--border-color); display:flex; align-items:center; justify-content:center; min-height:220px; overflow:hidden;">
-              <img src="${screenshotUrl}" alt="Payment Proof - ${order.id}" class="admin-payment-proof-modal-img"
-                style="max-width:900px; max-height:75vh; width:100%; object-fit:contain; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.5); display:inline-block;"
-                onerror="console.error('[STORAGE] Image load error:', this.src); this.onerror=null; this.parentElement.innerHTML='<div class=\\'text-center text-muted\\' style=\\'padding:3rem;\\'>⚠️ Screenshot preview failed to load from cloud.<br><a href=\\'${screenshotUrl}\\' target=\\'_blank\\' class=\\'btn btn-sm btn-primary mt-3\\'>Open Screenshot Link ↗</a></div>';" />
-              <style>
-                .admin-payment-proof-modal-img { max-width: 900px; max-height: 75vh; }
-                @media (max-width: 768px) {
-                  .admin-payment-proof-modal-img { max-width: 95vw !important; max-height: 75vh !important; }
-                }
-              </style>
-            </div>
-
-            <!-- Viewer Buttons -->
-            <div style="margin-top:1rem; display:flex; gap:0.75rem; justify-content:space-between; align-items:center; flex-wrap:wrap;">
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-                <button class="btn btn-sm btn-success" onclick="window.updatePaymentProofStatus('${order.id}', 'Verified')">✅ Verify Payment</button>
-                <button class="btn btn-sm btn-danger" onclick="window.updatePaymentProofStatus('${order.id}', 'Rejected')">❌ Reject Payment</button>
-              </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-                <a href="${screenshotUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">🔍 Open Full Size ↗</a>
-                <a href="${screenshotUrl}" download="Payment_Proof_${order.id}.png" class="btn btn-sm btn-outline">📥 Download</a>
-              </div>
+            <div style="margin-top:1rem; display:flex; gap:0.75rem; justify-content:center;">
+              <a href="${screenshotUrl}" target="_blank" download="Payment_Receipt_${orderId}.png" class="btn btn-sm btn-primary">
+                📥 Download Screenshot
+              </a>
+              <a href="${screenshotUrl}" target="_blank" class="btn btn-sm btn-outline">
+                🔗 Open in New Tab ↗
+              </a>
             </div>
           </div>
         `;
       } else {
         bodyHTML = `
-          <div style="padding:1.5rem; background:var(--bg-card); border-radius:14px; border:1px solid var(--border-color); text-align:center;">
-            <div style="font-size:3rem; margin-bottom:0.5rem;">⚪</div>
-            <h3 style="margin:0 0 0.5rem; font-size:1.3rem;">No payment proof uploaded</h3>
-            <p class="text-muted" style="max-width:500px; margin:0 auto 1.25rem; font-size:0.92rem; line-height:1.6;">
-              Customer submitted UPI UTR Reference <b>${pay.utr || 'N/A'}</b> & Payer Name <b>${pay.payerName || order.customerName}</b> for order <b>${order.id}</b> without attaching a payment screenshot.
-            </p>
-            <div style="display:inline-flex; gap:0.75rem; justify-content:center;">
-              <button class="btn btn-sm btn-success" onclick="window.updatePaymentProofStatus('${order.id}', 'Verified')">✅ Verify Payment (UTR ${pay.utr || ''})</button>
-              <button class="btn btn-sm btn-danger" onclick="window.updatePaymentProofStatus('${order.id}', 'Rejected')">❌ Reject Order</button>
+          <div style="background:linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color:white; padding:2rem; border-radius:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.15); padding-bottom:1rem; margin-bottom:1.5rem;">
+              <div>
+                <div style="color:#10b981; font-weight:700; font-size:0.85rem; text-transform:uppercase;">✓ UPI Payment Details Submitted</div>
+                <h3 style="font-size:1.4rem; margin-top:0.2rem;">${DBService.getSettingsSync().shopName || 'Print Shop'}</h3>
+              </div>
+              <div style="font-size:2.5rem;">📱</div>
+            </div>
+
+            <div style="margin-bottom:1.5rem;">
+              <div style="font-size:0.8rem; color:#94a3b8; text-transform:uppercase;">Total Amount Payable</div>
+              <div style="font-size:2.25rem; font-weight:800; color:#38bdf8;">${formatCurrency(order.pricing?.total)}</div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; background:rgba(255,255,255,0.05); padding:1rem; border-radius:12px; border:1px solid rgba(255,255,255,0.1);">
+              <div>
+                <div style="font-size:0.75rem; color:#94a3b8;">12-DIGIT UTR / REF NO.</div>
+                <div style="font-size:1.1rem; font-weight:700; font-family:monospace; color:#f1f5f9;">${pay.utr || 'N/A'}</div>
+              </div>
+              <div>
+                <div style="font-size:0.75rem; color:#94a3b8;">PAYER NAME</div>
+                <div style="font-size:1.05rem; font-weight:700; color:#f1f5f9;">${pay.payerName || order.customerName}</div>
+              </div>
+            </div>
+
+            <div style="margin-top:1.25rem; font-size:0.82rem; color:#94a3b8; text-align:center; background:rgba(255,255,255,0.04); padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.08);">
+              ℹ️ Customer submitted payment with UTR Ref <b>${pay.utr || 'N/A'}</b> & Payer Name <b>${pay.payerName || order.customerName}</b> without attaching an optional screenshot image.
             </div>
           </div>
         `;
       }
 
+      const modal = ModalComponent || window.ModalComponent;
       if (modal) {
         modal.show({
-          title: `🖼️ Payment Proof Inspection — ${order.id}`,
+          title: `Payment Receipt Inspection - ${order.id}`,
           bodyHTML: bodyHTML,
           footerHTML: `<button class="btn btn-secondary" onclick="if(window.ModalComponent) window.ModalComponent.close(); else document.getElementById('active-modal-overlay')?.remove();">Close</button>`,
-          width: '940px'
+          width: '650px'
         });
+      } else {
+        NotificationService.showToast(`UTR: ${pay.utr} | Payer: ${pay.payerName}`, 'info');
       }
     };
 
@@ -1459,7 +1351,6 @@ Thank you for choosing ${settings.shopName}!
   async renderPricing() {
     // Load pricing from Firebase, update PricingEngine in-memory cache
     const pricing = await DBService.getPricing();
-    const settings = await DBService.getSettings();
     await PricingEngine.preload(DBService);
 
     const html = `
@@ -1595,64 +1486,6 @@ Thank you for choosing ${settings.shopName}!
             </div>
           </div>
 
-          <!-- 5. Weight-Based Home Delivery Pricing -->
-          <div class="glass-panel" style="padding:1.25rem; border-radius:12px; grid-column:span 2; border:1.5px solid rgba(37,99,235,.25);">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;border-bottom:1px solid var(--border-color);padding-bottom:.75rem;gap:1rem;flex-wrap:wrap;">
-              <div>
-                <h4 style="margin:0;font-size:1.05rem;color:var(--primary);">🚚 Home Delivery — KG Pricing</h4>
-                <p class="text-muted" style="font-size:.78rem;margin:.25rem 0 0;">
-                  Customer delivery charge is calculated from total package weight. Store Pickup is always free.
-                </p>
-              </div>
-              <span class="badge badge-approved" style="font-size:.72rem;">WEIGHT BASED</span>
-            </div>
-
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;">
-              <div class="form-group">
-                <label class="form-label">Base Weight (KG)</label>
-                <input type="number" step="0.01" min="0.01" class="form-control" id="pricing-courier-base-kg"
-                  value="${Number(settings.courierPricing?.baseWeightKg ?? 1)}">
-                <small class="text-muted">Included in base price</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Base Price (₹)</label>
-                <input type="number" step="0.01" min="0" class="form-control" id="pricing-courier-base-cost"
-                  value="${Number(settings.courierPricing?.baseCost ?? 60)}">
-                <small class="text-muted">Example: 1 KG = ₹60</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Additional Slab (KG)</label>
-                <input type="number" step="0.01" min="0.01" class="form-control" id="pricing-courier-add-kg"
-                  value="${Number(settings.courierPricing?.additionalWeightKg ?? 0.5)}">
-                <small class="text-muted">Example: 0.5 KG</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Additional Slab Price (₹)</label>
-                <input type="number" step="0.01" min="0" class="form-control" id="pricing-courier-add-cost"
-                  value="${Number(settings.courierPricing?.additionalCost ?? 40)}">
-                <small class="text-muted">Example: +₹40 per slab</small>
-              </div>
-            </div>
-
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem;">
-              <div class="form-group">
-                <label class="form-label">Default Packing Weight (g)</label>
-                <input type="number" step="1" min="0" class="form-control" id="pricing-courier-pack-g"
-                  value="${Number(settings.courierPricing?.packagingWeightGrams ?? 50)}">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Binding Weight per Set (g)</label>
-                <input type="number" step="1" min="0" class="form-control" id="pricing-courier-bind-g"
-                  value="${Number(settings.courierPricing?.bindingWeightGrams ?? 30)}">
-              </div>
-            </div>
-
-            <div style="margin-top:.75rem;padding:.75rem 1rem;background:var(--bg-body);border-radius:9px;border:1px solid var(--border-color);font-size:.8rem;">
-              <b>Example:</b> 0–1 KG = ₹60 &nbsp;•&nbsp; 1.001–1.5 KG = ₹100 &nbsp;•&nbsp; 1.501–2 KG = ₹140.
-              The customer-facing delivery fee uses these settings for <b>Home Delivery</b> only.
-            </div>
-          </div>
-
           <!-- 5. Area-Wise Delivery Charges & Zones (CRUD) -->
           <div style="grid-column: span 2; border-top:1px solid var(--border-color); padding-top:1.5rem; margin-top:0.5rem;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; border-bottom:1px solid var(--border-color); padding-bottom:0.85rem; flex-wrap:wrap; gap:1rem;">
@@ -1749,28 +1582,8 @@ Thank you for choosing ${settings.shopName}!
         }
       });
 
-      const courierPricing = {
-        ...(settings.courierPricing || {}),
-        baseWeightKg: Math.max(0.01, Number(document.getElementById('pricing-courier-base-kg')?.value) || 1),
-        baseCost: Math.max(0, Number(document.getElementById('pricing-courier-base-cost')?.value) || 60),
-        additionalWeightKg: Math.max(0.01, Number(document.getElementById('pricing-courier-add-kg')?.value) || 0.5),
-        additionalCost: Math.max(0, Number(document.getElementById('pricing-courier-add-cost')?.value) || 40),
-        packagingWeightGrams: Math.max(0, Number(document.getElementById('pricing-courier-pack-g')?.value) || 0),
-        bindingWeightGrams: Math.max(0, Number(document.getElementById('pricing-courier-bind-g')?.value) || 0),
-        freeDelivery: false
-      };
-
-      const updatedSettings = { ...settings, courierPricing };
-      Promise.all([
-        PricingEngine.savePricingData(pricing, DBService),
-        DBService.saveSettings(updatedSettings)
-      ]).then(() => {
-        if (window.refreshShopSettingsUI) window.refreshShopSettingsUI(updatedSettings);
-        NotificationService.showToast('All pricing + KG delivery settings saved successfully!', 'success');
-      }).catch((err) => {
-        console.error('[PRICING] Save failed:', err);
-        NotificationService.showToast('Failed to save pricing settings.', 'error');
-      });
+      PricingEngine.savePricingData(pricing, DBService);
+      NotificationService.showToast('All pricing structure & delivery fees saved successfully!', 'success');
     };
 
     // Paper Size Add Modal & Handler
@@ -2128,62 +1941,15 @@ Thank you for choosing ${settings.shopName}!
   },
 
   // --- REPORTS & ANALYTICS FULL SYSTEM ---
-  async renderBookingReport() {
-    const bookings = await DBService.getBookingRequests(true);
-    const html = `
-      <div class="table-card mb-4">
-        <div class="table-toolbar" style="flex-wrap:wrap;gap:1rem;">
-          <div><h3>📅 T7 Shop Booking Report</h3><p class="text-muted" style="font-size:.85rem;">All T7 Shop service, design, sales and driver requests.</p></div>
-          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-            <button class="btn btn-sm btn-primary" id="btn-export-bookings-csv">📊 Export CSV</button>
-            <a class="btn btn-sm btn-outline" href="#admin-reports">📈 Sales Report</a>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;padding:1rem;">
-          <div class="metric-card"><b>${bookings.length}</b><span>Total</span></div>
-          <div class="metric-card"><b>${bookings.filter(b=>b.status==='New').length}</b><span>New</span></div>
-          <div class="metric-card"><b>${bookings.filter(b=>b.status==='Confirmed').length}</b><span>Confirmed</span></div>
-          <div class="metric-card"><b>${bookings.filter(b=>b.status==='Completed').length}</b><span>Completed</span></div>
-        </div>
-        <div class="table-responsive" style="padding:0 1.5rem 1.5rem;">
-          <table class="data-table"><thead><tr><th>Date</th><th>ID</th><th>Type</th><th>Item / Service</th><th>Customer</th><th>Phone</th><th>Preferred</th><th>Driver</th><th>Status</th><th>Action</th></tr></thead>
-          <tbody>${bookings.length ? bookings.map(b=>`
-            <tr>
-              <td>${new Date(b.createdAt||Date.now()).toLocaleString('en-IN')}</td>
-              <td><b>${esc(b.id)}</b></td>
-              <td>${esc(b.type==='driver'?'Driver':b.type==='product'?'Sales':'Service')}</td>
-              <td>${esc(b.itemService||'')}</td><td>${esc(b.customerName||'')}</td><td>${esc(b.customerPhone||'')}</td>
-              <td>${esc(b.preferredDate||'—')} ${esc(b.preferredTime||'')}</td>
-              <td>${b.type==='driver'?esc(`${b.driverType||''} | ${b.duration||''} | ${b.pickup||''} → ${b.dropRoute||''}`):'—'}</td>
-              <td><select class="form-select booking-status-select" data-id="${esc(b.id)}">${['New','Contacted','Confirmed','Completed','Cancelled'].map(s=>`<option value="${s}" ${b.status===s?'selected':''}>${s}</option>`).join('')}</select></td>
-              <td><button class="btn btn-sm btn-outline booking-wa-btn" data-phone="${esc(b.customerPhone||'')}">💬 WhatsApp</button></td>
-            </tr>`).join('') : `<tr><td colspan="10" class="text-center text-muted" style="padding:3rem;">No booking requests yet.</td></tr>`}</tbody>
-          </table>
-        </div>
-      </div>`;
-    await this.renderAdminLayout('booking-reports', html);
-    document.querySelectorAll('.booking-status-select').forEach(el => el.addEventListener('change', async () => {
-      try { await DBService.updateBookingStatus(el.dataset.id, el.value); NotificationService.showToast('Booking status updated.','success'); }
-      catch(e) { NotificationService.showToast('Failed to update booking status.','error'); }
-    }));
-    document.querySelectorAll('.booking-wa-btn').forEach(btn => btn.addEventListener('click', () => {
-      const p=String(btn.dataset.phone||'').replace(/\D/g,''); if(p) window.open(`https://wa.me/${p.length===10?'91'+p:p}`,'_blank','noopener');
-    }));
-    document.getElementById('btn-export-bookings-csv')?.addEventListener('click', () => {
-      exportToCSV('T7_Shop_Booking_Report.csv', bookings.map(b=>({BookingID:b.id,CreatedAt:b.createdAt,Type:b.type,ItemService:b.itemService,Customer:b.customerName,Phone:b.customerPhone,PreferredDate:b.preferredDate,PreferredTime:b.preferredTime,DriverType:b.driverType,Duration:b.duration,Pickup:b.pickup,DropRoute:b.dropRoute,Details:b.details,Status:b.status})));
-    });
-  },
-
-  async renderReports(queryStr = '') {
-    const orders = await DBService.getAllOrders();
-    if (new URLSearchParams(queryStr || '').get('view') === 'bookings') return this.renderBookingReport();
+  async renderReports() {
+    const orders = await DBService.getOrders();
 
     const html = `
       <div class="table-card mb-4">
         <div class="table-toolbar" style="flex-wrap:wrap; gap:1rem;">
           <div>
             <h3>📊 Full Executive Business Performance & Financial Reports</h3>
-            <p class="text-muted" style="font-size:0.85rem;">Filter sales records, analyze paper volume, track delivery revenues, and inspect active vs archived orders.</p>
+            <p class="text-muted" style="font-size:0.85rem;">Filter sales records, analyze paper volume, track delivery revenues, and export full transaction ledgers.</p>
           </div>
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
             <button class="btn btn-sm btn-outline" id="btn-print-report-summary">🖨️ Print Summary Report</button>
@@ -2211,27 +1977,17 @@ Thank you for choosing ${settings.shopName}!
           </div>
 
           <div style="display:flex; align-items:center; gap:0.5rem;">
-            <span style="font-weight:700; font-size:0.85rem; color:var(--text-muted);">Report View:</span>
-            <select class="form-select form-select-sm" id="report-archive-filter" style="width:160px;">
-              <option value="all" selected>All Orders</option>
-              <option value="active">Active Orders</option>
-              <option value="deleted">Deleted Orders</option>
-            </select>
-          </div>
-
-          <div style="display:flex; align-items:center; gap:0.5rem;">
             <span style="font-weight:700; font-size:0.85rem; color:var(--text-muted);">Status Filter:</span>
-            <select class="form-select form-select-sm" id="report-status-filter" style="width:180px;">
-              <option value="all" selected>All Statuses</option>
-              <option value="valid">Valid Net Orders (Active)</option>
+            <select class="form-select form-select-sm" id="report-status-filter" style="width:170px;">
+              <option value="all" selected>All Orders</option>
+              <option value="valid">Valid Net Orders (Non-Rejected)</option>
               <option value="Completed">Completed Only</option>
-              <option value="Rejected">Rejected Only</option>
-              <option value="Deleted">Deleted / Archived Only</option>
+              <option value="Rejected">Rejected / Deducted Only</option>
             </select>
           </div>
 
           <div style="display:flex; align-items:center; gap:0.5rem; margin-left:auto;">
-            <input type="text" class="form-control form-control-sm" id="report-search-ledger" placeholder="Search ID, Customer, UTR..." style="width:200px;">
+            <input type="text" class="form-control form-control-sm" id="report-search-ledger" placeholder="Search Order ID, Customer, UTR..." style="width:200px;">
           </div>
         </div>
 
@@ -2254,7 +2010,7 @@ Thank you for choosing ${settings.shopName}!
                 <th>Delivery Fee</th>
                 <th>Total Paid</th>
                 <th>UTR Payment</th>
-                <th>Status / Action</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody id="report-ledger-body">
@@ -2272,7 +2028,6 @@ Thank you for choosing ${settings.shopName}!
 
     // Dynamic Filter Engine
     const periodSelect = document.getElementById('report-period-filter');
-    const archiveSelect = document.getElementById('report-archive-filter');
     const customContainer = document.getElementById('custom-date-container');
     const dateFromInput = document.getElementById('report-date-from');
     const dateToInput = document.getElementById('report-date-to');
@@ -2284,14 +2039,13 @@ Thank you for choosing ${settings.shopName}!
       applyReportFilters();
     };
 
-    [archiveSelect, dateFromInput, dateToInput, statusSelect, searchLedgerInput].forEach(el => {
+    [dateFromInput, dateToInput, statusSelect, searchLedgerInput].forEach(el => {
       el?.addEventListener('input', applyReportFilters);
       el?.addEventListener('change', applyReportFilters);
     });
 
     function applyReportFilters() {
       const period = periodSelect.value;
-      const archiveF = archiveSelect.value;
       const statusF = statusSelect.value;
       const searchQ = (searchLedgerInput.value || '').toLowerCase().trim();
 
@@ -2299,10 +2053,6 @@ Thank you for choosing ${settings.shopName}!
       const todayStr = new Date().toISOString().slice(0, 10);
 
       const filtered = orders.filter(o => {
-        // Archive / Deletion filter
-        if (archiveF === 'active' && o.deleted === true) return false;
-        if (archiveF === 'deleted' && o.deleted !== true) return false;
-
         const oDate = new Date(o.createdAt || Date.now());
         const oDateStr = oDate.toISOString().slice(0, 10);
 
@@ -2324,9 +2074,7 @@ Thank you for choosing ${settings.shopName}!
 
         // Status filter
         if (statusF === 'valid') {
-          if (o.status === 'Rejected' || o.deleted === true) return false;
-        } else if (statusF === 'Deleted') {
-          if (o.deleted !== true) return false;
+          if (o.status === 'Rejected') return false;
         } else if (statusF !== 'all') {
           if (o.status !== statusF) return false;
         }
@@ -2338,8 +2086,7 @@ Thank you for choosing ${settings.shopName}!
           const phoneStr = (o.customerPhone || '').toLowerCase();
           const utrStr = (o.payment?.utr || '').toLowerCase();
           const areaStr = (o.pricing?.deliveryZone || '').toLowerCase();
-          const delUser = (o.deletedBy || '').toLowerCase();
-          if (!idStr.includes(searchQ) && !nameStr.includes(searchQ) && !phoneStr.includes(searchQ) && !utrStr.includes(searchQ) && !areaStr.includes(searchQ) && !delUser.includes(searchQ)) {
+          if (!idStr.includes(searchQ) && !nameStr.includes(searchQ) && !phoneStr.includes(searchQ) && !utrStr.includes(searchQ) && !areaStr.includes(searchQ)) {
             return false;
           }
         }
@@ -2348,18 +2095,16 @@ Thank you for choosing ${settings.shopName}!
       });
 
       // Recalculate Financial Metrics
-      const validActiveOrders = filtered.filter(o => o.deleted !== true && o.status !== 'Rejected');
-      const rejectedOrders = filtered.filter(o => o.deleted !== true && o.status === 'Rejected');
-      const deletedOrders = filtered.filter(o => o.deleted === true);
+      const validOrders = filtered.filter(o => o.status !== 'Rejected');
+      const rejectedOrders = filtered.filter(o => o.status === 'Rejected');
 
-      const netRevenue = validActiveOrders.reduce((acc, o) => acc + (o.pricing?.total || 0), 0);
-      const totalDeliveryFees = validActiveOrders.reduce((acc, o) => acc + (o.pricing?.deliveryFee || 0), 0);
+      const netRevenue = validOrders.reduce((acc, o) => acc + (o.pricing?.total || 0), 0);
+      const totalDeliveryFees = validOrders.reduce((acc, o) => acc + (o.pricing?.deliveryFee || 0), 0);
       const rejectedAmount = rejectedOrders.reduce((acc, o) => acc + (o.pricing?.total || 0), 0);
-      const deletedAmount = deletedOrders.reduce((acc, o) => acc + (o.pricing?.total || 0), 0);
-      const avgOrderValue = validActiveOrders.length ? netRevenue / validActiveOrders.length : 0;
+      const avgOrderValue = validOrders.length ? netRevenue / validOrders.length : 0;
 
       let totalPagesPrinted = 0;
-      validActiveOrders.forEach(o => {
+      validOrders.forEach(o => {
         const filesList = (o.files && o.files.length > 0) ? o.files : (o.file ? [o.file] : []);
         filesList.forEach(f => {
           const copies = (f.options || o.options)?.copies || 1;
@@ -2374,19 +2119,13 @@ Thank you for choosing ${settings.shopName}!
         <div class="glass-panel" style="padding:1.25rem;">
           <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Net Sales Revenue</h4>
           <div style="font-size:1.75rem; font-weight:800; color:var(--primary); margin-top:0.35rem;">${formatCurrency(netRevenue)}</div>
-          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">(Active valid non-rejected orders)</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">(Excludes rejected orders)</div>
         </div>
 
         <div class="glass-panel" style="padding:1.25rem;">
-          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Active Orders Count</h4>
-          <div style="font-size:1.75rem; font-weight:800; color:var(--accent); margin-top:0.35rem;">${validActiveOrders.length} Active</div>
+          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Valid Orders Count</h4>
+          <div style="font-size:1.75rem; font-weight:800; color:var(--accent); margin-top:0.35rem;">${validOrders.length} Orders</div>
           <div style="font-size:0.75rem; color:#ef4444; margin-top:0.2rem;">${rejectedOrders.length} rejected</div>
-        </div>
-
-        <div class="glass-panel" style="padding:1.25rem;">
-          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Archived / Deleted Orders</h4>
-          <div style="font-size:1.75rem; font-weight:800; color:#dc2626; margin-top:0.35rem;">${deletedOrders.length} Orders</div>
-          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">${formatCurrency(deletedAmount)} historical record</div>
         </div>
 
         <div class="glass-panel" style="padding:1.25rem;">
@@ -2396,15 +2135,21 @@ Thank you for choosing ${settings.shopName}!
         </div>
 
         <div class="glass-panel" style="padding:1.25rem;">
-          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Avg Active Order Value</h4>
+          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Avg Valid Order Value</h4>
           <div style="font-size:1.75rem; font-weight:800; color:var(--success); margin-top:0.35rem;">${formatCurrency(avgOrderValue)}</div>
-          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">Per active customer order</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">Per customer order</div>
         </div>
 
         <div class="glass-panel" style="padding:1.25rem;">
           <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Total Pages Printed</h4>
           <div style="font-size:1.75rem; font-weight:800; color:#7c3aed; margin-top:0.35rem;">${totalPagesPrinted} Pages</div>
           <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">Paper volume printed</div>
+        </div>
+
+        <div class="glass-panel" style="padding:1.25rem;">
+          <h4 style="color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">Rejected / Deducted</h4>
+          <div style="font-size:1.75rem; font-weight:800; color:#ef4444; margin-top:0.35rem;">-${formatCurrency(rejectedAmount)}</div>
+          <div style="font-size:0.75rem; color:#ef4444; margin-top:0.2rem;">${rejectedOrders.length} order(s) deducted</div>
         </div>
       `;
 
@@ -2422,24 +2167,11 @@ Thank you for choosing ${settings.shopName}!
         tbody.innerHTML = filtered.map(o => {
           const filesList = (o.files && o.files.length > 0) ? o.files : (o.file ? [o.file] : []);
           const totalPgs = filesList.reduce((acc, f) => acc + (f.pages || 1) * ((f.options || o.options)?.copies || 1), 0);
-          const isDel = o.deleted === true;
-
-          let statusDisplay = getStatusBadgeHTML(o.status);
-          if (isDel) {
-            statusDisplay = `<span class="badge badge-rejected" style="background:rgba(239,68,68,0.15); color:#dc2626; border:1px solid rgba(239,68,68,0.3); font-weight:800; font-size:0.75rem;">🔴 Deleted</span>`;
-          }
 
           return `
-            <tr style="${isDel ? 'background:rgba(239,68,68,0.05);' : ''}">
-              <td style="font-size:0.8rem;">
-                ${formatDate(o.createdAt)}<br>
-                <span style="color:var(--text-muted);">${formatTime(o.createdAt)}</span>
-                ${isDel ? `<div style="font-size:0.72rem; color:#dc2626; margin-top:0.25rem; font-weight:600;">🗑️ Deleted ${formatDate(o.deletedAt)} by ${o.deletedBy || 'Admin'}</div>` : ''}
-              </td>
-              <td>
-                <b>${o.id}</b>
-                ${isDel ? `<br><button class="btn btn-sm btn-link" style="font-size:0.72rem; padding:0; color:var(--primary); text-decoration:underline;" onclick="window.restoreOrderRecord('${o.id}')">🔄 Restore Order</button>` : ''}
-              </td>
+            <tr>
+              <td style="font-size:0.8rem;">${formatDate(o.createdAt)}<br><span style="color:var(--text-muted);">${formatTime(o.createdAt)}</span></td>
+              <td><b>${o.id}</b></td>
               <td>
                 <b>${o.customerName || 'Customer'}</b><br>
                 <span style="font-size:0.75rem; color:var(--text-muted);">${o.customerPhone || 'N/A'}</span>
@@ -2451,15 +2183,9 @@ Thank you for choosing ${settings.shopName}!
                 <b>${filesList.length} file(s)</b> • ${totalPgs} pgs
               </td>
               <td>${formatCurrency(o.pricing?.deliveryFee || 0)}</td>
-              <td><b style="color:${isDel ? '#dc2626' : (o.status === 'Rejected' ? '#ef4444' : 'var(--primary)')};">${formatCurrency(o.pricing?.total)}</b></td>
-              <td>
-                <code>${o.payment?.utr || 'N/A'}</code>
-                ${(o.paymentScreenshotUrl || o.payment?.screenshotUrl) ? `<br><button class="btn btn-sm btn-link" style="font-size:0.7rem; padding:0;" onclick="window.viewOrderScreenshot('${o.id}')">🖼️ View Proof</button>` : ''}
-              </td>
-              <td>
-                ${statusDisplay}
-                ${isDel ? `<br><button class="btn btn-sm btn-success" style="font-size:0.7rem; padding:0.15rem 0.45rem; margin-top:0.35rem;" onclick="window.restoreOrderRecord('${o.id}')">🔄 Restore</button>` : ''}
-              </td>
+              <td><b style="color:${o.status === 'Rejected' ? '#ef4444' : 'var(--primary)'};">${formatCurrency(o.pricing?.total)}</b></td>
+              <td><code>${o.payment?.utr || 'N/A'}</code></td>
+              <td>${getStatusBadgeHTML(o.status)}</td>
             </tr>
           `;
         }).join('');
@@ -2470,9 +2196,9 @@ Thank you for choosing ${settings.shopName}!
       tfoot.innerHTML = `
         <tr>
           <td colspan="5">Summary Total (${filtered.length} Filtered Transactions)</td>
-          <td><b>${formatCurrency(filtered.reduce((sum, o) => sum + ((o.deleted !== true && o.status !== 'Rejected') ? (o.pricing?.deliveryFee || 0) : 0), 0))}</b></td>
+          <td><b>${formatCurrency(filtered.reduce((sum, o) => sum + (o.status !== 'Rejected' ? (o.pricing?.deliveryFee || 0) : 0), 0))}</b></td>
           <td style="color:var(--primary); font-size:1.05rem;"><b>${formatCurrency(netRevenue)}</b></td>
-          <td colspan="2">Net Active Revenue (Excludes Deleted &amp; Rejected)</td>
+          <td colspan="2">Net Gain (Excludes Rejected)</td>
         </tr>
       `;
     }
@@ -2498,10 +2224,7 @@ Thank you for choosing ${settings.shopName}!
           DeliveryFee: o.pricing?.deliveryFee || 0,
           TotalAmount: o.pricing?.total || 0,
           PaymentUTR: o.payment?.utr || 'N/A',
-          OrderStatus: o.status,
-          IsDeleted: o.deleted ? 'Yes' : 'No',
-          DeletedAt: o.deletedAt || '',
-          DeletedBy: o.deletedBy || ''
+          OrderStatus: o.status
         };
       });
       exportToCSV('Team7_Full_Sales_Ledger.csv', exportRows);
@@ -2511,135 +2234,6 @@ Thank you for choosing ${settings.shopName}!
     // Print Report Summary
     document.getElementById('btn-print-report-summary').onclick = () => {
       window.print();
-    };
-  },
-
-  // --- FIREBASE DIAGNOSTIC ---
-  async renderFirebaseDiagnostic() {
-    const run = async () => {
-      const results = [];
-      const started = Date.now();
-      const add = (name, status, detail, ms) => results.push({ name, status, detail, ms });
-
-      // 1. SDK / app initialization
-      try {
-        await initFirebase();
-        const services = getServices();
-        if (!services.db && !services.auth && !services.storage) {
-          add('Firebase SDK / App', 'FAIL', 'Firebase initialized without service handles. Check SDK loading, browser extensions, network and Firebase config.', Date.now()-started);
-        } else {
-          add('Firebase SDK / App', 'PASS', `Project: ${firebaseConfig.projectId}`, Date.now()-started);
-        }
-
-        // Firestore read
-        const t=Date.now();
-        if (!services.db) {
-          add('Firestore', 'FAIL', 'Firestore handle is unavailable because Firebase initialization failed.', Date.now()-t);
-        } else {
-          try {
-            const { doc, getDoc } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
-            const snap = await getDoc(doc(services.db, 'settings', 'general'));
-            add('Firestore', 'PASS', snap.exists() ? 'settings/general is readable.' : 'Connected, but settings/general does not exist.', Date.now()-t);
-          } catch(e) {
-            add('Firestore', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-t);
-          }
-        }
-
-        // Realtime Database read
-        const t2=Date.now();
-        if (!services.firebaseApp) {
-          add('Realtime Database', 'FAIL', 'Firebase app handle unavailable.', Date.now()-t2);
-        } else {
-          try {
-            const { getDatabase, ref, get } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js');
-            const rtdb = getDatabase(services.firebaseApp);
-            await get(ref(rtdb, '__t7_diagnostic__'));
-            add('Realtime Database', 'PASS', 'Read test completed.', Date.now()-t2);
-          } catch(e) {
-            add('Realtime Database', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-t2);
-          }
-        }
-
-        // Storage read/list test
-        const t3=Date.now();
-        if (!services.storage) {
-          add('Firebase Storage', 'FAIL', 'Storage handle is unavailable because Firebase initialization failed.', Date.now()-t3);
-        } else {
-          try {
-            const { ref, listAll } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js');
-            await listAll(ref(services.storage, 'uploads'));
-            add('Firebase Storage', 'PASS', 'Storage bucket is reachable and uploads/ can be listed.', Date.now()-t3);
-          } catch(e) {
-            // list permission failure is still useful diagnostic information.
-            add('Firebase Storage', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-t3);
-          }
-        }
-
-        // Authentication state
-        const t4=Date.now();
-        try {
-          const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
-          const auth = getAuth(services.firebaseApp);
-          add('Firebase Authentication', 'PASS', auth.currentUser ? `Signed in as ${auth.currentUser.email || auth.currentUser.uid}` : 'Firebase Auth is reachable; no Firebase user is signed in.', Date.now()-t4);
-        } catch(e) {
-          add('Firebase Authentication', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-t4);
-        }
-      } catch(e) {
-        add('Firebase SDK / App', 'FAIL', `${e.code || 'error'}: ${e.message || e}`, Date.now()-started);
-      }
-
-      return results;
-    };
-
-    const render = (results = null) => {
-      const escD = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-      const passed = results ? results.filter(r=>r.status==='PASS').length : 0;
-      const failed = results ? results.filter(r=>r.status==='FAIL').length : 0;
-      return `
-        <div class="table-card">
-          <div class="table-toolbar" style="align-items:flex-start;gap:1rem;">
-            <div>
-              <h3>🔥 Firebase Diagnostic</h3>
-              <p class="text-muted">Tests the actual Firebase connection used by T7-PrintHub. It does not write test data.</p>
-            </div>
-            <button class="btn btn-primary" id="run-firebase-diagnostic">🔄 Run Diagnostics</button>
-          </div>
-          <div style="padding:1.25rem;">
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem;">
-              <div class="metric-card"><b>${results ? passed : '—'}</b><span>Passed</span></div>
-              <div class="metric-card"><b>${results ? failed : '—'}</b><span>Failed</span></div>
-              <div class="metric-card"><b>${escD(firebaseConfig.projectId)}</b><span>Firebase Project</span></div>
-            </div>
-            ${results ? `
-            <div style="display:grid;gap:.65rem;">
-              ${results.map(r=>`
-                <div style="display:grid;grid-template-columns:220px 90px 1fr 70px;gap:.75rem;align-items:center;padding:1rem;border:1px solid var(--border-color);border-radius:10px;">
-                  <strong>${escD(r.name)}</strong>
-                  <span class="badge ${r.status==='PASS'?'badge-success':'badge-danger'}">${r.status}</span>
-                  <span style="word-break:break-word;">${escD(r.detail)}</span>
-                  <small class="text-muted">${r.ms} ms</small>
-                </div>`).join('')}
-            </div>
-            <div style="margin-top:1rem;padding:1rem;border-radius:10px;background:var(--bg-body);">
-              <b>What to send me:</b>
-              <div class="text-muted" style="margin-top:.35rem;">If anything says FAIL, send me a screenshot of this page. The exact error code/message will identify the problem.</div>
-            </div>` : `
-              <div style="padding:3rem;text-align:center;border:1px dashed var(--border-color);border-radius:12px;">
-                <div style="font-size:3rem;">🔥</div>
-                <h3>Ready to test Firebase</h3>
-                <p class="text-muted">Click Run Diagnostics.</p>
-              </div>`}
-          </div>
-        </div>`;
-    };
-
-    await this.renderAdminLayout('firebase-diagnostic', render());
-    const btn=document.getElementById('run-firebase-diagnostic');
-    if(btn) btn.onclick=async()=>{
-      btn.disabled=true; btn.textContent='⏳ Testing...';
-      const results=await run();
-      await this.renderAdminLayout('firebase-diagnostic', render(results));
-      document.getElementById('run-firebase-diagnostic')?.focus();
     };
   },
 
@@ -2708,8 +2302,8 @@ Thank you for choosing ${settings.shopName}!
           </div>
 
           <div style="margin-top:1.5rem;padding:1.25rem;border:1px solid var(--border-color);border-radius:14px;background:var(--bg-body);">
-            <h3 style="margin:0 0 .35rem;">🚚 Home Delivery KG Pricing</h3>
-            <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem;">Set the weight-based customer delivery charge. Store Pickup is always free.</p>
+            <h3 style="margin:0 0 .35rem;">🚚 Courier Pricing & Free Delivery</h3>
+            <p class="text-muted" style="font-size:.8rem;margin-bottom:1rem;">Internal courier cost. Customers see FREE DELIVERY.</p>
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;">
               <div class="form-group"><label class="form-label">Courier</label><input class="form-control" id="st-courier-name" value="${settings.courierPricing?.courierName || 'ST Courier'}"></div>
               <div class="form-group"><label class="form-label">Base Weight (KG)</label><input type="number" step="0.01" min="0.01" class="form-control" id="st-courier-base-kg" value="${Number(settings.courierPricing?.baseWeightKg ?? 1)}"></div>
@@ -2718,7 +2312,7 @@ Thank you for choosing ${settings.shopName}!
               <div class="form-group"><label class="form-label">Additional Slab Cost (₹)</label><input type="number" step="0.01" min="0" class="form-control" id="st-courier-add-cost" value="${Number(settings.courierPricing?.additionalCost ?? 40)}"></div>
               <div class="form-group"><label class="form-label">Default Packing Weight (g)</label><input type="number" step="1" min="0" class="form-control" id="st-courier-pack-g" value="${Number(settings.courierPricing?.packagingWeightGrams ?? 50)}"></div>
               <div class="form-group"><label class="form-label">Binding Weight (g)</label><input type="number" step="1" min="0" class="form-control" id="st-courier-bind-g" value="${Number(settings.courierPricing?.bindingWeightGrams ?? 30)}"></div>
-              <div style="padding-top:1.8rem;font-weight:700;color:#059669;">✓ Weight-based delivery charges enabled</div>
+              <label style="display:flex;align-items:center;gap:.5rem;font-weight:700;padding-top:1.8rem;"><input type="checkbox" id="st-free-delivery" ${settings.courierPricing?.freeDelivery !== false ? 'checked' : ''}> FREE DELIVERY to customer</label>
             </div>
           </div>
         </div>
@@ -2752,7 +2346,7 @@ Thank you for choosing ${settings.shopName}!
           additionalCost: Number(document.getElementById('st-courier-add-cost').value) || 40,
           packagingWeightGrams: Number(document.getElementById('st-courier-pack-g').value) || 0,
           bindingWeightGrams: Number(document.getElementById('st-courier-bind-g').value) || 0,
-          freeDelivery: false
+          freeDelivery: document.getElementById('st-free-delivery').checked
         },
       };
 
@@ -2770,551 +2364,10 @@ Thank you for choosing ${settings.shopName}!
     };
   },
 
-  // --- ADMIN ABOUT PAGE EDITOR ---
-  async renderAboutSettings() {
-    const escapeHtml = (val) => String(val ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-    let savedData = await DBService.getAboutPage();
-    let workingData = JSON.parse(JSON.stringify(savedData));
-    let pendingCreatorFile = null;
-
-    const renderUI = async () => {
-      const c = workingData.creator || {};
-      const defaultAvatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="%233b82f6"><circle cx="50" cy="35" r="22"/><path d="M15,88 C15,65 30,55 50,55 C70,55 85,65 85,88 Z"/></svg>`;
-      const previewImgUrl = c.imageUrl && c.imageUrl.trim() ? c.imageUrl : defaultAvatarSvg;
-
-      const html = `
-        <div class="table-card" style="padding:0;">
-          <div class="table-toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; padding:1.25rem 1.5rem; background:var(--bg-card); border-bottom:1px solid var(--border-color);">
-            <div>
-              <h3 style="margin:0; font-size:1.3rem;">ℹ️ About Page & Creator Profile Editor</h3>
-              <p class="text-muted" style="margin:0.25rem 0 0; font-size:0.83rem;">Manage public About page content, creator profile (Vignesh), services showcase, steps, and contact info.</p>
-            </div>
-            <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
-              <button class="btn btn-secondary btn-sm" id="btn-preview-about">👁️ Live Preview</button>
-              <button class="btn btn-outline btn-sm" id="btn-reset-about">🔄 Reset</button>
-              <button class="btn btn-success btn-sm" id="btn-save-about">💾 Save Changes</button>
-            </div>
-          </div>
-
-          <div style="padding:1.5rem; display:flex; flex-direction:column; gap:2rem;">
-
-            <!-- 1. CREATOR EDITOR (VIGNESH PROFILE) -->
-            <div style="background:var(--bg-card); border:1.5px solid var(--primary-light); border-radius:14px; padding:1.5rem; box-shadow:var(--shadow-sm);">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem;">
-                <div style="display:flex; align-items:center; gap:0.6rem;">
-                  <span style="font-size:1.5rem;">👨‍💻</span>
-                  <div>
-                    <h4 style="margin:0; font-size:1.1rem; color:var(--primary);">Creator Profile Section ("This App Was Created by Vignesh")</h4>
-                    <span class="text-muted" style="font-size:0.78rem;">Fully customizable creator spotlight displayed on the public About page.</span>
-                  </div>
-                </div>
-                <label style="display:inline-flex; align-items:center; gap:0.5rem; font-weight:700; cursor:pointer; font-size:0.9rem;">
-                  <input type="checkbox" id="abt-creator-enabled" ${c.enabled !== false ? 'checked' : ''}>
-                  Show Creator Section on About Page
-                </label>
-              </div>
-
-              <!-- Creator Photo Uploader -->
-              <div style="display:grid; grid-template-columns:160px 1fr; gap:1.5rem; align-items:center; background:var(--primary-light); padding:1.25rem; border-radius:12px; margin-bottom:1.25rem; border:1px solid var(--border-color);">
-                <div style="text-align:center;">
-                  <div style="width:130px; height:130px; border-radius:50%; overflow:hidden; border:4px solid var(--primary); background:white; margin:0 auto; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow-md);">
-                    <img id="abt-creator-img-preview" src="${previewImgUrl}" alt="Creator Photo" style="width:100%; height:100%; object-fit:cover; object-position:center;" onerror="this.onerror=null;this.src='${defaultAvatarSvg}';" />
-                  </div>
-                  <span id="abt-creator-upload-status" style="font-size:0.75rem; color:var(--text-muted); margin-top:0.4rem; font-weight:600; display:block;">
-                    ${c.imageUrl ? '✅ Saved in Firebase' : 'Default Avatar'}
-                  </span>
-                </div>
-
-                <div>
-                  <h5 style="margin:0 0 0.35rem; font-size:0.95rem; font-weight:700;">Creator Image Component</h5>
-                  <p class="text-muted" style="font-size:0.8rem; margin:0 0 0.85rem;">
-                    Upload JPG, JPEG, PNG, or WEBP photo (max 10MB). Recommended: 500×500 or 800×800 square photo.
-                  </p>
-                  <div style="display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;">
-                    <input type="file" id="abt-creator-file-input" accept="image/jpeg,image/png,image/webp,image/jpg" style="display:none;">
-                    <button type="button" class="btn btn-sm btn-primary" id="btn-trigger-creator-photo">📁 Choose Image</button>
-                    <button type="button" class="btn btn-sm btn-success" id="abt-creator-upload-btn">⚡ Upload / Save Image</button>
-                    <button type="button" class="btn btn-sm btn-danger" id="abt-creator-img-remove">🗑️ Remove Image</button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Creator Text Details -->
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label" style="font-weight:700;">Creator Name *</label>
-                  <input type="text" class="form-control" id="abt-creator-name" value="${escapeHtml(c.name || 'Vignesh')}">
-                </div>
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label" style="font-weight:700;">Creator Heading / Title *</label>
-                  <input type="text" class="form-control" id="abt-creator-heading" value="${escapeHtml(c.heading || 'This App Was Created by Vignesh')}">
-                </div>
-              </div>
-
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Role / Tagline</label>
-                  <input type="text" class="form-control" id="abt-creator-role" value="${escapeHtml(c.role || 'Developer & Creator')}">
-                </div>
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Creator Contact Phone</label>
-                  <input type="text" class="form-control" id="abt-creator-phone" value="${escapeHtml(c.phone || '9360039283')}">
-                </div>
-              </div>
-
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Call Button Label</label>
-                  <input type="text" class="form-control" id="abt-creator-call-text" value="${escapeHtml(c.callBtnText || `📞 Contact ${c.name || 'Vignesh'} — ${c.phone || '9360039283'}`)}">
-                </div>
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">WhatsApp Button Label</label>
-                  <input type="text" class="form-control" id="abt-creator-wa-text" value="${escapeHtml(c.whatsappBtnText || '💬 WhatsApp Vignesh')}">
-                </div>
-              </div>
-
-              <div class="form-group" style="margin:0;">
-                <label class="form-label">Creator Biography / Description</label>
-                <textarea class="form-control" id="abt-creator-desc" rows="3">${escapeHtml(c.description || '')}</textarea>
-              </div>
-            </div>
-
-            <!-- 2. GENERAL PAGE CONTENT -->
-            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:1.5rem;">
-              <h4 style="margin:0 0 1rem; font-size:1.1rem;">📝 Page Title & Main Description</h4>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">About Page Badge / Title</label>
-                  <input type="text" class="form-control" id="abt-title" value="${escapeHtml(workingData.title || 'T7 Print Hub')}">
-                </div>
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Subheading</label>
-                  <input type="text" class="form-control" id="abt-subtitle" value="${escapeHtml(workingData.subtitle || '')}">
-                </div>
-              </div>
-              <div class="form-group" style="margin:0;">
-                <label class="form-label">Main Application Description</label>
-                <textarea class="form-control" id="abt-desc" rows="3">${escapeHtml(workingData.description || '')}</textarea>
-              </div>
-            </div>
-
-            <!-- 3. SERVICES SHOWCASE MANAGER -->
-            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:1.5rem;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-                <h4 style="margin:0; font-size:1.1rem;">🛠️ About Page Services Showcase (${(workingData.services || []).length} items)</h4>
-                <button type="button" class="btn btn-sm btn-primary" id="abt-add-service-btn">➕ Add Service</button>
-              </div>
-              <div id="abt-services-list" style="display:flex; flex-direction:column; gap:0.75rem;">
-                ${(workingData.services || []).map((srv, idx) => `
-                  <div style="display:grid; grid-template-columns:36px 40px minmax(0,1fr) minmax(0,2fr) auto auto; gap:0.75rem; align-items:center; padding:0.75rem; background:var(--primary-light); border:1px solid var(--border-color); border-radius:10px;">
-                    <span style="font-weight:800; color:var(--text-muted); text-align:center;">#${idx + 1}</span>
-                    <input type="text" class="form-control form-control-sm srv-icon" data-idx="${idx}" value="${escapeHtml(srv.icon || '📄')}" style="text-align:center;">
-                    <input type="text" class="form-control form-control-sm srv-title" data-idx="${idx}" value="${escapeHtml(srv.title || '')}" placeholder="Service Title">
-                    <input type="text" class="form-control form-control-sm srv-desc" data-idx="${idx}" value="${escapeHtml(srv.description || '')}" placeholder="Short Description">
-                    <label style="margin:0; font-size:0.78rem; font-weight:700; cursor:pointer;">
-                      <input type="checkbox" class="srv-enabled" data-idx="${idx}" ${srv.enabled !== false ? 'checked' : ''}> Show
-                    </label>
-                    <div style="display:flex; gap:0.3rem;">
-                      <button type="button" class="btn btn-sm btn-secondary srv-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>▲</button>
-                      <button type="button" class="btn btn-sm btn-secondary srv-down" data-idx="${idx}" ${idx === workingData.services.length - 1 ? 'disabled' : ''}>▼</button>
-                      <button type="button" class="btn btn-sm btn-danger srv-del" data-idx="${idx}">✕</button>
-                    </div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-
-            <!-- 4. HOW IT WORKS STEPS MANAGER -->
-            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:1.5rem;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-                <h4 style="margin:0; font-size:1.1rem;">📌 How It Works Steps (${(workingData.steps || []).length} steps)</h4>
-                <button type="button" class="btn btn-sm btn-primary" id="abt-add-step-btn">➕ Add Step</button>
-              </div>
-              <div id="abt-steps-list" style="display:flex; flex-direction:column; gap:0.75rem;">
-                ${(workingData.steps || []).map((step, idx) => `
-                  <div style="display:grid; grid-template-columns:50px minmax(0,1fr) minmax(0,2fr) auto auto; gap:0.75rem; align-items:center; padding:0.75rem; background:var(--primary-light); border:1px solid var(--border-color); border-radius:10px;">
-                    <span style="font-weight:800; color:var(--primary); text-align:center;">Step ${idx + 1}</span>
-                    <input type="text" class="form-control form-control-sm step-title" data-idx="${idx}" value="${escapeHtml(step.title || '')}" placeholder="Step Title">
-                    <input type="text" class="form-control form-control-sm step-desc" data-idx="${idx}" value="${escapeHtml(step.description || '')}" placeholder="Step Description">
-                    <label style="margin:0; font-size:0.78rem; font-weight:700; cursor:pointer;">
-                      <input type="checkbox" class="step-enabled" data-idx="${idx}" ${step.enabled !== false ? 'checked' : ''}> Show
-                    </label>
-                    <div style="display:flex; gap:0.3rem;">
-                      <button type="button" class="btn btn-sm btn-secondary step-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>▲</button>
-                      <button type="button" class="btn btn-sm btn-secondary step-down" data-idx="${idx}" ${idx === workingData.steps.length - 1 ? 'disabled' : ''}>▼</button>
-                      <button type="button" class="btn btn-sm btn-danger step-del" data-idx="${idx}">✕</button>
-                    </div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-
-            <!-- 5. CONTACT & SOCIAL LINKS -->
-            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:1.5rem;">
-              <h4 style="margin:0 0 1rem; font-size:1.1rem;">📞 Contact & Social Media Links</h4>
-              <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.25rem; margin-bottom:1.25rem;">
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Phone</label>
-                  <input type="text" class="form-control" id="abt-cnt-phone" value="${escapeHtml(workingData.contact?.phone || '')}">
-                </div>
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">WhatsApp</label>
-                  <input type="text" class="form-control" id="abt-cnt-wa" value="${escapeHtml(workingData.contact?.whatsapp || '')}">
-                </div>
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Email</label>
-                  <input type="email" class="form-control" id="abt-cnt-email" value="${escapeHtml(workingData.contact?.email || '')}">
-                </div>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem;">
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Facebook URL</label>
-                  <input type="url" class="form-control" id="abt-soc-fb" value="${escapeHtml(workingData.socialLinks?.facebook || '')}">
-                </div>
-                <div class="form-group" style="margin:0;">
-                  <label class="form-label">Instagram URL</label>
-                  <input type="url" class="form-control" id="abt-soc-ig" value="${escapeHtml(workingData.socialLinks?.instagram || '')}">
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      `;
-
-      await this.renderAdminLayout('about', html);
-      attachEvents();
-    };
-
-    const readFormValues = () => {
-      const getVal = (id) => document.getElementById(id)?.value?.trim() || '';
-
-      workingData.title = getVal('abt-title');
-      workingData.subtitle = getVal('abt-subtitle');
-      workingData.description = getVal('abt-desc');
-
-      workingData.creator = {
-        ...(workingData.creator || {}),
-        enabled: !!document.getElementById('abt-creator-enabled')?.checked,
-        name: getVal('abt-creator-name'),
-        heading: getVal('abt-creator-heading'),
-        role: getVal('abt-creator-role'),
-        phone: getVal('abt-creator-phone'),
-        callBtnText: getVal('abt-creator-call-text'),
-        whatsappBtnText: getVal('abt-creator-wa-text'),
-        description: getVal('abt-creator-desc')
-      };
-
-      document.querySelectorAll('.srv-title').forEach(input => {
-        const idx = Number(input.dataset.idx);
-        if (workingData.services[idx]) {
-          workingData.services[idx].title = input.value.trim();
-          workingData.services[idx].icon = document.querySelector(`.srv-icon[data-idx="${idx}"]`)?.value?.trim() || '📄';
-          workingData.services[idx].description = document.querySelector(`.srv-desc[data-idx="${idx}"]`)?.value?.trim() || '';
-          workingData.services[idx].enabled = !!document.querySelector(`.srv-enabled[data-idx="${idx}"]`)?.checked;
-        }
-      });
-
-      document.querySelectorAll('.step-title').forEach(input => {
-        const idx = Number(input.dataset.idx);
-        if (workingData.steps[idx]) {
-          workingData.steps[idx].title = input.value.trim();
-          workingData.steps[idx].description = document.querySelector(`.step-desc[data-idx="${idx}"]`)?.value?.trim() || '';
-          workingData.steps[idx].enabled = !!document.querySelector(`.step-enabled[data-idx="${idx}"]`)?.checked;
-        }
-      });
-
-      workingData.contact = {
-        ...(workingData.contact || {}),
-        phone: getVal('abt-cnt-phone'),
-        whatsapp: getVal('abt-cnt-wa'),
-        email: getVal('abt-cnt-email')
-      };
-
-      workingData.socialLinks = {
-        ...(workingData.socialLinks || {}),
-        facebook: getVal('abt-soc-fb'),
-        instagram: getVal('abt-soc-ig')
-      };
-    };
-
-    const executeCreatorImageUpload = async () => {
-      if (!pendingCreatorFile) return null;
-      const statusEl = document.getElementById('abt-creator-upload-status');
-      if (statusEl) statusEl.textContent = '⏳ Uploading to Firebase Storage...';
-
-      try {
-        const uploadResult = await StorageService.uploadCreatorImage(pendingCreatorFile);
-        if (!uploadResult || !uploadResult.downloadURL) {
-          throw new Error('Firebase Storage did not return a valid download URL.');
-        }
-
-        workingData.creator.imageUrl = uploadResult.downloadURL;
-        workingData.creator.imageStoragePath = uploadResult.storagePath || '';
-        pendingCreatorFile = null;
-
-        const imgEl = document.getElementById('abt-creator-img-preview');
-        if (imgEl) imgEl.src = uploadResult.downloadURL + (uploadResult.downloadURL.includes('?') ? '&' : '?') + 't=' + Date.now();
-        if (statusEl) statusEl.textContent = '✅ Image uploaded successfully!';
-
-        NotificationService.showToast('Image uploaded successfully', 'success');
-        return uploadResult;
-      } catch (uploadErr) {
-        console.error('[CREATOR IMAGE] Upload error:', uploadErr);
-        if (statusEl) statusEl.textContent = '❌ Upload failed!';
-        NotificationService.showToast(`Creator image upload failed: ${uploadErr.message || 'Storage error'}`, 'error');
-        throw uploadErr;
-      }
-    };
-
-    const attachEvents = () => {
-      document.getElementById('btn-trigger-creator-photo')?.addEventListener('click', () => {
-        document.getElementById('abt-creator-file-input')?.click();
-      });
-
-      document.getElementById('abt-creator-file-input')?.addEventListener('change', async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const type = String(file.type || '').toLowerCase();
-        if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(file.name || '')) {
-          NotificationService.showToast('Invalid file: Image file must be JPG, JPEG, PNG, or WEBP.', 'error');
-          e.target.value = '';
-          return;
-        }
-        if (file.size > 10 * 1024 * 1024) {
-          NotificationService.showToast('Invalid file: Image file size must be 10MB or smaller.', 'error');
-          e.target.value = '';
-          return;
-        }
-
-        try {
-          const previewUrl = await StorageService.readFileAsDataURL(file);
-          const imgEl = document.getElementById('abt-creator-img-preview');
-          const statusEl = document.getElementById('abt-creator-upload-status');
-          if (imgEl) imgEl.src = previewUrl;
-          if (statusEl) statusEl.textContent = `📁 Ready: ${file.name} (${StorageService.formatBytes(file.size)})`;
-          pendingCreatorFile = file;
-          NotificationService.showToast('Image selected! Click "Upload / Save Image" to upload to Firebase.', 'info');
-        } catch (err) {
-          console.error('[ABOUT] Local preview failed:', err);
-          NotificationService.showToast('Failed to preview image file.', 'error');
-        }
-      });
-
-      document.getElementById('abt-creator-upload-btn')?.addEventListener('click', async () => {
-        readFormValues();
-        const btn = document.getElementById('abt-creator-upload-btn');
-        if (!pendingCreatorFile) {
-          if (workingData.creator.imageUrl) {
-            NotificationService.showToast('Creator image is already uploaded to Firebase Storage.', 'info');
-          } else {
-            NotificationService.showToast('Please choose an image file first.', 'warning');
-          }
-          return;
-        }
-
-        const originalText = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '⏳ Uploading...';
-
-        try {
-          await executeCreatorImageUpload();
-          savedData = await DBService.saveAboutPage(workingData);
-          await renderUI();
-        } catch (err) {
-          // Toast handled in executeCreatorImageUpload
-        } finally {
-          if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-          }
-        }
-      });
-
-      document.getElementById('abt-creator-img-remove')?.addEventListener('click', async () => {
-        if (!confirm("Remove creator image?")) return;
-        readFormValues();
-
-        const statusEl = document.getElementById('abt-creator-upload-status');
-        if (statusEl) statusEl.textContent = '⏳ Deleting image...';
-
-        if (workingData.creator.imageStoragePath) {
-          try {
-            await StorageService.deleteFileByPath(workingData.creator.imageStoragePath);
-          } catch (e) {
-            console.warn('[CREATOR IMAGE] Storage deletion warning:', e);
-          }
-        }
-
-        pendingCreatorFile = null;
-        workingData.creator.imageUrl = '';
-        workingData.creator.imageStoragePath = '';
-
-        try {
-          savedData = await DBService.saveAboutPage(workingData);
-          NotificationService.showToast('Creator image removed.', 'info');
-          await renderUI();
-        } catch (err) {
-          console.error('[CREATOR IMAGE] Remove save error:', err);
-          NotificationService.showToast('Failed to update Firestore after image removal.', 'error');
-        }
-      });
-
-      document.getElementById('abt-add-service-btn')?.addEventListener('click', () => {
-        readFormValues();
-        workingData.services.push({
-          id: 'srv-' + Date.now(),
-          icon: '📄',
-          title: 'New Printing Service',
-          description: 'Service description details...',
-          enabled: true,
-          imageUrl: ''
-        });
-        renderUI();
-      });
-
-      document.querySelectorAll('.srv-del').forEach(btn => {
-        btn.onclick = () => {
-          readFormValues();
-          const idx = Number(btn.dataset.idx);
-          workingData.services.splice(idx, 1);
-          renderUI();
-        };
-      });
-
-      document.querySelectorAll('.srv-up').forEach(btn => {
-        btn.onclick = () => {
-          readFormValues();
-          const idx = Number(btn.dataset.idx);
-          if (idx > 0) {
-            const temp = workingData.services[idx];
-            workingData.services[idx] = workingData.services[idx - 1];
-            workingData.services[idx - 1] = temp;
-            renderUI();
-          }
-        };
-      });
-
-      document.querySelectorAll('.srv-down').forEach(btn => {
-        btn.onclick = () => {
-          readFormValues();
-          const idx = Number(btn.dataset.idx);
-          if (idx < workingData.services.length - 1) {
-            const temp = workingData.services[idx];
-            workingData.services[idx] = workingData.services[idx + 1];
-            workingData.services[idx + 1] = temp;
-            renderUI();
-          }
-        };
-      });
-
-      document.getElementById('abt-add-step-btn')?.addEventListener('click', () => {
-        readFormValues();
-        workingData.steps.push({
-          number: workingData.steps.length + 1,
-          title: 'New Step',
-          description: 'Step description details...',
-          enabled: true
-        });
-        renderUI();
-      });
-
-      document.querySelectorAll('.step-del').forEach(btn => {
-        btn.onclick = () => {
-          readFormValues();
-          const idx = Number(btn.dataset.idx);
-          workingData.steps.splice(idx, 1);
-          workingData.steps.forEach((s, i) => s.number = i + 1);
-          renderUI();
-        };
-      });
-
-      document.querySelectorAll('.step-up').forEach(btn => {
-        btn.onclick = () => {
-          readFormValues();
-          const idx = Number(btn.dataset.idx);
-          if (idx > 0) {
-            const temp = workingData.steps[idx];
-            workingData.steps[idx] = workingData.steps[idx - 1];
-            workingData.steps[idx - 1] = temp;
-            workingData.steps.forEach((s, i) => s.number = i + 1);
-            renderUI();
-          }
-        };
-      });
-
-      document.querySelectorAll('.step-down').forEach(btn => {
-        btn.onclick = () => {
-          readFormValues();
-          const idx = Number(btn.dataset.idx);
-          if (idx < workingData.steps.length - 1) {
-            const temp = workingData.steps[idx];
-            workingData.steps[idx] = workingData.steps[idx + 1];
-            workingData.steps[idx + 1] = temp;
-            workingData.steps.forEach((s, i) => s.number = i + 1);
-            renderUI();
-          }
-        };
-      });
-
-      document.getElementById('btn-reset-about')?.addEventListener('click', async () => {
-        workingData = JSON.parse(JSON.stringify(savedData));
-        pendingCreatorFile = null;
-        await renderUI();
-        NotificationService.showToast('Reset to saved About settings.', 'info');
-      });
-
-      document.getElementById('btn-preview-about')?.addEventListener('click', () => {
-        readFormValues();
-        const modal = ModalComponent || window.ModalComponent;
-        if (modal?.show && PublicViews?.renderAboutHTML) {
-          modal.show({
-            title: '👁️ Live Customer About Page Preview',
-            bodyHTML: PublicViews.renderAboutHTML(workingData),
-            width: '960px'
-          });
-        }
-      });
-
-      document.getElementById('btn-save-about')?.addEventListener('click', async () => {
-        readFormValues();
-        const btn = document.getElementById('btn-save-about');
-        const originalText = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '⏳ Saving...';
-
-        try {
-          if (pendingCreatorFile) {
-            await executeCreatorImageUpload();
-          }
-
-          savedData = await DBService.saveAboutPage(workingData);
-          pendingCreatorFile = null;
-          NotificationService.showToast('About page updated successfully', 'success');
-          await renderUI();
-        } catch (err) {
-          console.error('[ABOUT] Save failed:', err);
-          NotificationService.showToast('Failed to update About page: ' + (err?.message || 'Firebase error'), 'error');
-        } finally {
-          if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-          }
-        }
-      });
-    };
-
-    await renderUI();
-  },
-
   // --- CATALOG MANAGER: PRINTING SERVICES + STATIONERY PRODUCTS ---
   async renderCatalog() {
     const catalog = await DBService.getServicesCatalog();
     const products = await DBService.getProductsCatalog();
-    const shopSettings = DBService.getSettingsSync();
-    const productCategories = Array.isArray(shopSettings.shopProductCategories) && shopSettings.shopProductCategories.length
-      ? shopSettings.shopProductCategories
-      : ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
 
     const hashQuery = (window.location.hash.split('?')[1] || '');
     const activeTab = new URLSearchParams(hashQuery).get('tab') === 'stationery'
@@ -3367,11 +2420,7 @@ Thank you for choosing ${settings.shopName}!
       </tr>
     ` : products.map(p => `
       <tr>
-        <td style="text-align:center;">
-          ${p.imageUrl
-            ? `<img src="${esc(p.imageUrl)}" alt="${esc(p.name || 'Product')}" loading="lazy" style="width:58px;height:58px;object-fit:cover;border-radius:8px;border:1px solid var(--border-color);">`
-            : `<span style="font-size:1.5rem;">${esc(p.icon || '📦')}</span>`}
-        </td>
+        <td style="font-size:1.5rem;text-align:center;">${esc(p.icon || '📦')}</td>
         <td>
           <b>${esc(p.name || 'Unnamed Product')}</b>
           <div style="font-size:.75rem;color:var(--text-muted);">ID: ${esc(p.id)}</div>
@@ -3416,14 +2465,9 @@ Thank you for choosing ${settings.shopName}!
               ✏️ Stationery & Shop Products
             </button>
           </div>
-          <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-            ${activeTab === 'stationery'
-              ? '<button class="btn btn-success" onclick="window.openProductModal()">➕ Add Product</button>'
-              : '<button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add Service</button>'}
-            <button class="btn btn-primary" onclick="window.openProductModal(null, true)">🛍️ Add T7 Shop Product</button>
-            <button class="btn btn-primary" onclick="window.openCatalogModal(null, true)">🛍️ Add T7 Shop Service</button>
-            <button class="btn btn-outline" onclick="window.openT7ProductCategories()">⚙️ Product Categories</button>
-          </div>
+          ${activeTab === 'stationery'
+            ? '<button class="btn btn-success" onclick="window.openProductModal()">➕ Add Product</button>'
+            : '<button class="btn btn-success" onclick="window.openCatalogModal()">➕ Add Service</button>'}
         </div>
 
         <div style="padding:1rem 1.25rem;">
@@ -3462,75 +2506,12 @@ Thank you for choosing ${settings.shopName}!
       window.location.hash = `#admin-catalog?tab=${tab === 'stationery' ? 'stationery' : 'printing'}`;
     };
 
-    window.openT7ProductCategories = async () => {
-      const settings = DBService.getSettingsSync();
-      let categories = Array.isArray(settings.shopProductCategories) && settings.shopProductCategories.length
-        ? [...settings.shopProductCategories]
-        : ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
-
-      const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-      const render = () => `
-        <div style="padding:.25rem;">
-          <div style="display:flex;gap:.5rem;margin-bottom:1rem;">
-            <input class="form-control" id="new-t7-category" placeholder="Enter new product category" maxlength="60">
-            <button class="btn btn-success" type="button" onclick="window.addT7ProductCategory()">➕ Add</button>
-          </div>
-          <div id="t7-category-list">
-            ${categories.map((c,i) => `
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.75rem;border:1px solid var(--border-color);border-radius:9px;margin-bottom:.5rem;">
-                <span><b>${escHtml(c)}</b></span>
-                <button class="btn btn-sm btn-danger" type="button" onclick="window.removeT7ProductCategory(${i})">🗑️ Delete</button>
-              </div>`).join('')}
-          </div>
-          <small class="text-muted">Categories are saved in Firebase settings and will appear in the product editor.</small>
-        </div>`;
-
-      window._t7ProductCategories = categories;
-
-      window.addT7ProductCategory = async () => {
-        const input = document.getElementById('new-t7-category');
-        const value = String(input?.value || '').trim();
-        if (!value) return NotificationService.showToast('Enter a category name.', 'warning');
-        const list = window._t7ProductCategories || [];
-        if (list.some(c => c.toLowerCase() === value.toLowerCase())) {
-          return NotificationService.showToast('That category already exists.', 'warning');
-        }
-        list.push(value);
-        window._t7ProductCategories = list;
-        await DBService.saveSettings({ shopProductCategories: list });
-        NotificationService.showToast('Product category added.', 'success');
-        await window.openT7ProductCategories();
-      };
-
-      window.removeT7ProductCategory = async (index) => {
-        const list = [...(window._t7ProductCategories || [])];
-        if (!list[index]) return;
-        const used = (await DBService.getProductsCatalog()).some(p => String(p.category || '').toLowerCase() === String(list[index]).toLowerCase());
-        if (used && !confirm(`"${list[index]}" is used by a product. Delete the category anyway? Existing products will keep their current category.`)) return;
-        list.splice(index, 1);
-        window._t7ProductCategories = list;
-        await DBService.saveSettings({ shopProductCategories: list });
-        NotificationService.showToast('Product category deleted.', 'info');
-        await window.openT7ProductCategories();
-      };
-
-      await ModalComponent.open({
-        title: '⚙️ T7 Shop Product Categories',
-        bodyHTML: render(),
-        width: '600px'
-      });
-    };
-
-    window.openProductModal = async (productId = null, shopMode = false) => {
+    window.openProductModal = async (productId = null) => {
       try {
         const allItems = await DBService.getProductsCatalog();
         const existing = productId ? allItems.find(item => item.id === productId) : null;
 
-        const shopSettings = DBService.getSettingsSync();
-        const categories = Array.isArray(shopSettings.shopProductCategories) && shopSettings.shopProductCategories.length
-          ? shopSettings.shopProductCategories
-          : ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
+        const categories = ['Pen', 'Pencil', 'Folder', 'Notebook', 'Accessory', 'Other'];
         const modalHTML = `
           <form id="product-form" onsubmit="event.preventDefault(); window.saveProductForm('${esc(productId || '')}');">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -3575,33 +2556,6 @@ Thank you for choosing ${settings.shopName}!
             <div class="form-group">
               <label class="form-label">Description *</label>
               <textarea class="form-control" id="prod-desc" rows="3" required>${esc(existing?.description || '')}</textarea>
-            </div> 
-            <div class="form-group" style="padding:1rem;border:1px solid var(--border-color);border-radius:10px;">
-              <label class="form-label">🖼️ Product Image</label>
-              <input type="file" class="form-control" id="prod-image" accept="image/jpeg,image/png,image/gif,image/webp">
-              ${existing?.imageUrl ? `<div style="margin-top:.75rem;"><img src="${esc(existing.imageUrl)}" alt="Product" style="width:120px;height:90px;object-fit:cover;border-radius:10px;"></div>` : ''}
-              <small class="text-muted">JPG, PNG, GIF or WEBP • maximum 10MB</small>
-            </div> 
-            <div class="form-group">
-              <label style="display:flex;align-items:center;gap:.55rem;font-weight:700;">
-                <input type="checkbox" id="prod-t7-shop" ${existing?.t7ShopEnabled || shopMode ? 'checked' : ''} style="width:18px;height:18px;">
-                🛍️ Show this product in T7 Shop
-              </label>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;padding:1rem;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-body);">
-              <div class="form-group"><label class="form-label">T7 Shop Category</label>
-                <select class="form-select" id="prod-t7-category">
-                  <option value="computers" ${existing?.t7ShopCategory==='computers' ? 'selected' : ''}>💻 Laptop & PC Sales</option>
-                  <option value="amd" ${existing?.t7ShopCategory==='amd' ? 'selected' : ''}>🧩 AMD & PC Accessories</option>
-                  <option value="design" ${existing?.t7ShopCategory==='design' ? 'selected' : ''}>🎨 Design & Printing</option>
-                </select>
-              </div>
-              <div class="form-group"><label class="form-label">Customer Action</label>
-                <select class="form-select" id="prod-t7-action">
-                  <option value="enquiry" ${existing?.t7ShopAction!=='service' ? 'selected' : ''}>Buy / Enquire</option>
-                  <option value="service" ${existing?.t7ShopAction==='service' ? 'selected' : ''}>Book / Enquire</option>
-                </select>
-              </div>
             </div>
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -3645,24 +2599,8 @@ Thank you for choosing ${settings.shopName}!
       const description = document.getElementById('prod-desc')?.value.trim();
       const status = document.getElementById('prod-status')?.value || 'Active';
       const popular = !!document.getElementById('prod-popular')?.checked;
-       const t7ShopEnabled = !!document.getElementById('prod-t7-shop')?.checked;
-       const t7ShopCategory = document.getElementById('prod-t7-category')?.value || 'computers';
-       const t7ShopAction = document.getElementById('prod-t7-action')?.value || 'enquiry';
 
-      let imageUrl = '';
-       let imageStoragePath = '';
-       const existingProducts = await DBService.getProductsCatalog();
-       const existingProduct = productId ? existingProducts.find(p => p.id === productId) : null;
-       imageUrl = existingProduct?.imageUrl || '';
-       imageStoragePath = existingProduct?.imageStoragePath || '';
-       const imageFile = document.getElementById('prod-image')?.files?.[0] || null;
-       if (imageFile) {
-         const upload = await StorageService.uploadCatalogImage(imageFile, 'products', productId || ('prod-' + Date.now()));
-         imageUrl = upload.url || upload.downloadURL || imageUrl;
-         imageStoragePath = upload.storagePath || imageStoragePath;
-       }
-
-       if (!name || !description || !Number.isFinite(price) || price < 0 || !Number.isFinite(weightGrams) || weightGrams < 0 || !Number.isFinite(packagingWeightGrams) || packagingWeightGrams < 0) {
+      if (!name || !description || !Number.isFinite(price) || price < 0 || !Number.isFinite(weightGrams) || weightGrams < 0 || !Number.isFinite(packagingWeightGrams) || packagingWeightGrams < 0) {
         NotificationService.showToast('Please enter a valid product name, description and price.', 'warning');
         return;
       }
@@ -3670,8 +2608,7 @@ Thank you for choosing ${settings.shopName}!
       try {
         await DBService.saveProductItem({
           ...(productId ? { id: productId } : {}),
-          name, category, price, weightGrams, packagingWeightGrams, icon, stockStatus, description, status, popular,
-           t7ShopEnabled, t7ShopCategory, t7ShopAction, imageUrl, imageStoragePath
+          name, category, price, weightGrams, packagingWeightGrams, icon, stockStatus, description, status, popular
         });
 
         window.ModalComponent?.close();
@@ -3697,7 +2634,7 @@ Thank you for choosing ${settings.shopName}!
       }
     };
 
-    window.openCatalogModal = async (serviceId = null, shopMode = false) => {
+    window.openCatalogModal = async (serviceId = null) => {
       const allItems = await DBService.getServicesCatalog();
       const existing = serviceId ? allItems.find(item => item.id === serviceId) : null;
 
@@ -3736,28 +2673,7 @@ Thank you for choosing ${settings.shopName}!
           <div class="form-group">
             <label class="form-label">Description *</label>
             <textarea class="form-control" id="cat-desc" rows="3" required>${esc(existing?.description || '')}</textarea>
-          </div> 
-           <div class="form-group">
-             <label style="display:flex;align-items:center;gap:.55rem;font-weight:700;">
-               <input type="checkbox" id="cat-t7-shop" ${existing?.t7ShopEnabled || shopMode ? 'checked' : ''} style="width:18px;height:18px;">
-               🛍️ Show this service in T7 Shop
-             </label>
-           </div>
-           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;padding:1rem;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-body);">
-             <div class="form-group"><label class="form-label">T7 Shop Category</label>
-               <select class="form-select" id="cat-t7-category">
-                 <option value="design" ${existing?.t7ShopCategory==='design' ? 'selected' : ''}>🎨 Design & Printing</option>
-                 <option value="services" ${existing?.t7ShopCategory==='services' ? 'selected' : ''}>🛠️ Computer Services</option>
-                 <option value="driver" ${existing?.t7ShopCategory==='driver' ? 'selected' : ''}>🚗 Driver Booking</option>
-               </select>
-             </div>
-             <div class="form-group"><label class="form-label">Customer Action</label>
-               <select class="form-select" id="cat-t7-action">
-                 <option value="service" ${existing?.t7ShopAction!=='driver' ? 'selected' : ''}>Book / Enquire</option>
-                 <option value="driver" ${existing?.t7ShopAction==='driver' ? 'selected' : ''}>Driver Booking</option>
-               </select>
-             </div>
-           </div>
+          </div>
 
           <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;">
             <input type="checkbox" id="cat-popular" ${existing?.popular ? 'checked' : ''} style="width:18px;height:18px;">
@@ -3791,9 +2707,6 @@ Thank you for choosing ${settings.shopName}!
       const status = document.getElementById('cat-status')?.value || 'Active';
       const description = document.getElementById('cat-desc')?.value.trim();
       const popular = !!document.getElementById('cat-popular')?.checked;
-       const t7ShopEnabled = !!document.getElementById('cat-t7-shop')?.checked;
-       const t7ShopCategory = document.getElementById('cat-t7-category')?.value || 'design';
-       const t7ShopAction = document.getElementById('cat-t7-action')?.value || 'service';
 
       if (!title || !startingPrice || !description) {
         NotificationService.showToast('Please fill out all required service fields.', 'warning');
@@ -3803,8 +2716,7 @@ Thank you for choosing ${settings.shopName}!
       try {
         await DBService.saveCatalogItem({
           ...(serviceId ? { id: serviceId } : {}),
-          title, category, startingPrice, icon, status, description, popular,
-           t7ShopEnabled, t7ShopCategory, t7ShopAction
+          title, category, startingPrice, icon, status, description, popular
         });
 
         window.ModalComponent?.close();

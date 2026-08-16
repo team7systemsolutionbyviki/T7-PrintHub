@@ -75,14 +75,12 @@ export const NavbarComponent = {
           <ul class="nav-links">
             <li><a href="#home" class="nav-link">${I18nService.t('nav_home')}</a></li>
             <li><a href="#services" class="nav-link">${I18nService.t('nav_services')}</a></li>
-            <li><a href="#shop" class="nav-link">🛍️ Shop</a></li>
             <li><a href="#pricing" class="nav-link">${I18nService.t('nav_pricing')}</a></li>
             <li><a href="#how-it-works" class="nav-link">${I18nService.t('nav_how_it_works')}</a></li>
             <li><a href="#order" class="nav-link">${I18nService.t('nav_order')}</a></li>
             <li><a href="#track" class="nav-link">${I18nService.t('nav_track')}</a></li>
             <li><a href="#faq" class="nav-link">${I18nService.t('nav_faq')}</a></li>
             <li><a href="#contact" class="nav-link">${I18nService.t('nav_contact')}</a></li>
-            <li><a href="#about" class="nav-link">ℹ️ About</a></li>
           </ul>
 
           <div class="nav-actions">
@@ -234,7 +232,6 @@ export const NavbarComponent = {
       <div class="mobile-drawer-links">
         <a href="#home"         class="mobile-drawer-link">🏠 ${I18nService.t('nav_home')}</a>
         <a href="#services"     class="mobile-drawer-link">🖨️ ${I18nService.t('nav_services')}</a>
-        <a href="#shop"         class="mobile-drawer-link">🛍️ T7 Shop</a>
         <a href="#pricing"      class="mobile-drawer-link">💰 ${I18nService.t('nav_pricing')}</a>
         <a href="#how-it-works" class="mobile-drawer-link">📋 ${I18nService.t('nav_how_it_works')}</a>
         <a href="#order"        class="mobile-drawer-link">📄 ${I18nService.t('nav_order')}</a>

@@ -8,7 +8,7 @@ export const firebaseConfig = {
   authDomain: "printing-app-9a63f.firebaseapp.com",
   databaseURL: "https://printing-app-9a63f-default-rtdb.firebaseio.com",
   projectId: "printing-app-9a63f",
-  storageBucket: "printing-app-9a63f.appspot.com",
+  storageBucket: "printing-app-9a63f.firebasestorage.app",
   messagingSenderId: "10036391737",
   appId: "1:10036391737:web:ef9686abd9655defbf82e8"
 };
@@ -22,7 +22,6 @@ let db          = null;
 let auth        = null;
 let storage     = null;
 let _initPromise = null;  // Singleton promise — prevents double-init
-let firebaseInitError = null;
 
 // Initialize Firebase — all 4 SDK modules loaded in PARALLEL
 export async function initFirebase() {
@@ -53,13 +52,11 @@ export async function initFirebase() {
       auth        = getAuth(firebaseApp);
       storage     = getStorage(firebaseApp);
 
-      console.log('⚡ Firebase initialized. Storage Bucket:', storage?.app?.options?.storageBucket || firebaseConfig.storageBucket);
+      console.log('⚡ Firebase initialized (parallel load).');
       return { firebaseApp, db, auth, storage, mode: 'FIREBASE' };
     } catch (err) {
-      firebaseInitError = err;
-      console.error('[FIREBASE INIT FAILED]', err);
-      // Do not silently label a real Firebase failure as DEMO/offline.
-      return { firebaseApp: null, db: null, auth: null, storage: null, mode: 'FIREBASE_ERROR', error: err };
+      console.warn('Firebase SDK load error, falling back to Local Storage Engine:', err);
+      return { firebaseApp: null, db: null, auth: null, storage: null, mode: 'DEMO' };
     }
   })();
 
@@ -67,9 +64,5 @@ export async function initFirebase() {
 }
 
 export function getServices() {
-  return {
-    db, auth, storage, firebaseApp,
-    isDemo: !isFirebaseConfigured(),
-    firebaseInitError
-  };
+  return { db, auth, storage, firebaseApp, isDemo: !isFirebaseConfigured() };
 }
