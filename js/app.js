@@ -10,6 +10,7 @@ import { PublicViews } from './views/public-views.js';
 import { AdminViews } from './views/admin-views.js';
 import { CustomerViews } from './views/customer-views.js';
 import { DBService } from './services/db-service.js';
+import { StorageService } from './services/storage-service.js';
 import { PricingEngine } from './services/pricing-engine.js';
 import { ModalComponent } from './components/modal.js';
 import { NotificationService } from './services/notification-service.js';
@@ -246,6 +247,7 @@ const initApp = async () => {
       await Promise.race([
         (async () => {
           await initFirebase();
+          await StorageService.initStorage();
           await DBService.getSettings(true); // Force fresh fetch from Firebase server
           await DBService.getServicesCatalog();
         })(),

@@ -503,8 +503,9 @@ export const AdminViews = {
                   <td>
                     ${(() => {
                       const pay = o.payment || {};
+                      const proofObj = o.paymentProof || pay.paymentProof || null;
                       const payStatus = o.paymentStatus || pay.status || (o.status === 'Completed' || o.status === 'Payment Approved' ? 'Verified' : (o.status === 'Rejected' ? 'Rejected' : 'Waiting Verification'));
-                      const proofUrl = pay.screenshotUrl || pay.paymentScreenshotUrl || o.paymentScreenshotUrl || pay.screenshotDataUrl || pay.screenshot || o.screenshotUrl || '';
+                      const proofUrl = proofObj?.downloadURL || pay.screenshotUrl || pay.paymentScreenshotUrl || o.paymentScreenshotUrl || pay.screenshotDataUrl || pay.screenshot || o.screenshotUrl || '';
                       const hasProof = !!(proofUrl && proofUrl.trim());
 
                       let statusBadgeHTML = '';
@@ -834,6 +835,11 @@ export const AdminViews = {
     };
 
     window.viewOrderScreenshot = async (orderId) => {
+      if (!AuthService.isAdminLoggedIn()) {
+        NotificationService.showToast('Access denied: Admin authentication required to view payment screenshots.', 'error');
+        return;
+      }
+
       const order = await DBService.getOrderById(orderId);
       if (!order) {
         NotificationService.showToast('Order not found', 'error');
@@ -841,8 +847,10 @@ export const AdminViews = {
       }
 
       const pay = order.payment || {};
+      const proofObj = order.paymentProof || pay.paymentProof || null;
       const payStatus = order.paymentStatus || pay.status || (order.status === 'Completed' || order.status === 'Payment Approved' ? 'Verified' : (order.status === 'Rejected' ? 'Rejected' : 'Waiting Verification'));
-      const rawUrl = pay.screenshotUrl || pay.paymentScreenshotUrl || order.paymentScreenshotUrl || pay.screenshotDataUrl || pay.screenshot || order.screenshotUrl || '';
+
+      const rawUrl = proofObj?.downloadURL || pay.screenshotUrl || pay.paymentScreenshotUrl || order.paymentScreenshotUrl || pay.screenshotDataUrl || pay.screenshot || order.screenshotUrl || '';
       const rawDataUrl = pay.screenshotDataUrl || pay.fallbackData || (rawUrl.startsWith('data:') ? rawUrl : '');
       const rawIdbKey = pay.screenshotIdbKey || (rawUrl.startsWith('idb://') ? rawUrl.replace('idb://', '') : '');
 
@@ -945,7 +953,6 @@ export const AdminViews = {
         `;
       }
 
-      const modal = ModalComponent || window.ModalComponent;
       if (modal) {
         modal.show({
           title: `🖼️ Payment Proof Inspection — ${order.id}`,

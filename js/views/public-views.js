@@ -1762,6 +1762,7 @@ export const PublicViews = {
       const file = e.target.files?.[0];
       const container = document.getElementById('pay-screenshot-preview-container');
       const img = document.getElementById('pay-screenshot-img-preview');
+
       if (!file) {
         if (container) container.style.display = 'none';
         return;
@@ -1773,19 +1774,31 @@ export const PublicViews = {
         if (container) container.style.display = 'none';
         return;
       }
-      if (file.size > 10 * 1024 * 1024) {
-        NotificationService.showToast('Payment proof image size must be 10MB or smaller.', 'error');
+      if (file.size > 5 * 1024 * 1024) {
+        NotificationService.showToast('Payment proof image size must be 5MB or smaller.', 'error');
         e.target.value = '';
         if (container) container.style.display = 'none';
         return;
       }
 
       try {
-        const dataUrl = await StorageService.readFileAsDataURL(file);
-        if (img) img.src = dataUrl;
+        const comp = await StorageService.compressImage(file, 1600, 0.80);
+        const localUrl = URL.createObjectURL(comp.blob);
+        if (img) img.src = localUrl;
+
+        let infoLabel = container?.querySelector('.screenshot-size-info');
+        if (!infoLabel && container) {
+          infoLabel = document.createElement('div');
+          infoLabel.className = 'screenshot-size-info';
+          infoLabel.style.cssText = 'font-size:0.78rem; color:var(--text-muted); margin-top:0.4rem; font-weight:600;';
+          container.appendChild(infoLabel);
+        }
+        if (infoLabel) {
+          infoLabel.innerHTML = `🖼️ <b>Payment Screenshot Preview</b> • Original: <b>${StorageService.formatBytes(comp.originalSize)}</b> → Compressed: <b style="color:#10b981;">${StorageService.formatBytes(comp.compressedSize)}</b>`;
+        }
         if (container) container.style.display = 'block';
       } catch (err) {
-        console.warn('Payment proof local preview failed:', err);
+        console.warn('Payment proof preview failed:', err);
       }
     });
 
@@ -1906,13 +1919,14 @@ export const PublicViews = {
           document.head.appendChild(style);
         }
 
-        const updateProgressUI = (activeStepIndex, statusMessage) => {
+        const updateProgressUI = (activeStepIndex, statusMessage, failedStepIndex = 0, failedStepMessage = '') => {
           const steps = [
+            'Validating order',
             'Saving payment details',
             'Uploading payment proof',
-            'Saving order to cloud database',
+            'Saving order',
             'Sending confirmation',
-            'Order completed'
+            'Completed'
           ];
 
           let stepsHTML = '';
@@ -1921,7 +1935,10 @@ export const PublicViews = {
             let icon = '<span style="color:rgba(255,255,255,0.3); font-weight:600;">○</span>';
             let textColor = 'color:rgba(255,255,255,0.5);';
 
-            if (stepNum < activeStepIndex) {
+            if (failedStepIndex && stepNum === failedStepIndex) {
+              icon = '<span style="color:#ef4444; font-weight:800;">✕</span>';
+              textColor = 'color:#f87171; font-weight:700;';
+            } else if (stepNum < activeStepIndex || (activeStepIndex === 6 && stepNum <= 6)) {
               icon = '<span style="color:#10b981; font-weight:800;">✓</span>';
               textColor = 'color:rgba(255,255,255,0.85); font-weight:600;';
             } else if (stepNum === activeStepIndex) {
@@ -1929,81 +1946,114 @@ export const PublicViews = {
               textColor = 'color:#38bdf8; font-weight:700;';
             }
 
+            const nameToDisplay = (failedStepIndex && stepNum === failedStepIndex && failedStepMessage)
+              ? failedStepMessage
+              : stepName;
+
             stepsHTML += `
               <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.45rem;">
                 <div style="width:16px; text-align:center;">${icon}</div>
-                <span style="${textColor} font-size:0.85rem;">${stepName}</span>
+                <span style="${textColor} font-size:0.85rem;">${nameToDisplay}</span>
               </div>
             `;
           });
 
           loadingOverlay.innerHTML = `
-            <div style="text-align:center; padding:2.5rem; max-width:440px; width:90%;">
-              <div style="position:relative; width:84px; height:84px; margin:0 auto 1.5rem;">
+            <div style="text-align:center; padding:2.25rem; max-width:440px; width:90%;">
+              <div style="position:relative; width:80px; height:80px; margin:0 auto 1.25rem;">
                 <div style="position:absolute; inset:0; border-radius:50%; border:4px solid rgba(255,255,255,0.1);"></div>
                 <div style="position:absolute; inset:0; border-radius:50%; border:4px solid transparent; border-top-color:#3b82f6; border-right-color:#8b5cf6; animation: spinRing 1.1s linear infinite;"></div>
                 <div style="position:absolute; inset:10px; border-radius:50%; border:3px solid transparent; border-bottom-color:#10b981; animation: spinRing 0.75s linear infinite reverse;"></div>
-                <div style="position:absolute; inset:20px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#8b5cf6); display:flex; align-items:center; justify-content:center; font-size:1.3rem;">🖨️</div>
+                <div style="position:absolute; inset:18px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#8b5cf6); display:flex; align-items:center; justify-content:center; font-size:1.25rem;">🖨️</div>
               </div>
-              <h3 style="color:#fff; font-size:1.4rem; font-weight:800; margin-bottom:0.5rem;">Submitting Your Order...</h3>
-              <p style="color:rgba(255,255,255,0.65); font-size:0.88rem; line-height:1.5; margin-bottom:1.5rem;">${statusMessage || 'Processing your request...'}</p>
-              <div style="background:rgba(255,255,255,0.06); border-radius:14px; padding:1rem 1.25rem; border:1px solid rgba(255,255,255,0.12); text-align:left;">
+              <h3 style="color:#fff; font-size:1.35rem; font-weight:800; margin-bottom:0.4rem;">${failedStepIndex ? 'Unable to Place Your Order' : 'Submitting Your Order...'}</h3>
+              <p style="color:rgba(255,255,255,0.65); font-size:0.88rem; line-height:1.5; margin-bottom:1.25rem;">${statusMessage || 'Processing your request...'}</p>
+              <div style="background:rgba(255,255,255,0.06); border-radius:14px; padding:1rem 1.25rem; border:1px solid rgba(255,255,255,0.12); text-align:left; margin-bottom:${failedStepIndex ? '1.25rem' : '0'};">
                 ${stepsHTML}
               </div>
+              ${failedStepIndex ? `
+                <div style="display:flex; gap:0.65rem; justify-content:center; margin-top:1.25rem;">
+                  <button id="overlay-retry-btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1); color:#fff; border:none; border-radius:10px; padding:0.65rem 1.25rem; font-size:0.9rem; font-weight:700; cursor:pointer;">
+                    🔄 Try Again
+                  </button>
+                  <button id="overlay-cancel-btn" style="background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.65rem 1.1rem; font-size:0.9rem; font-weight:600; cursor:pointer;">
+                    ✕ Cancel
+                  </button>
+                </div>
+              ` : ''}
             </div>
           `;
+
+          if (failedStepIndex) {
+            document.getElementById('overlay-retry-btn')?.addEventListener('click', () => {
+              if (loadingOverlay) loadingOverlay.remove();
+              btnSubmit.disabled = false;
+              btnSubmit.innerHTML = originalText;
+              isSubmitting = false;
+              btnSubmit.click();
+            });
+            document.getElementById('overlay-cancel-btn')?.addEventListener('click', () => {
+              if (loadingOverlay) loadingOverlay.remove();
+              btnSubmit.disabled = false;
+              btnSubmit.innerHTML = originalText;
+              isSubmitting = false;
+            });
+          }
         };
 
         let isOrderSavedSuccessfully = false;
         let createdOrder = null;
 
         try {
-          // STEP 1: Payment save started
+          // STEP 1: Validating order
+          console.log('[ORDER] Validation started');
+          updateProgressUI(1, 'Validating order details and file options...');
+          await new Promise(r => setTimeout(r, 150));
+          console.log('[ORDER] Validation completed');
+
+          // STEP 2: Saving payment details
           console.log('[ORDER] Payment save started');
-          updateProgressUI(1, 'Validating payment information...');
+          updateProgressUI(2, 'Processing payment details...');
           await new Promise(r => setTimeout(r, 150));
           console.log('[ORDER] Payment save completed');
 
-          // STEP 2: Screenshot upload (if provided)
-          let screenshotUrl = '';
-          let screenshotStoragePath = '';
-          let screenshotIdbKey = '';
-          let screenshotDataUrl = '';
+          // STEP 3: Direct Payment Proof Upload to Firebase Storage SDK
+          let paymentProofObj = null;
 
           const screenshotFile = screenshotInput && screenshotInput.files && screenshotInput.files[0];
           if (screenshotFile) {
-            console.log('[ORDER] Screenshot upload started');
-            updateProgressUI(2, 'Uploading payment proof image...');
+            console.log('[ORDER] Payment screenshot upload started');
+            updateProgressUI(3, 'Compressing & uploading payment screenshot...');
 
             const type = String(screenshotFile.type || '').toLowerCase();
             if (!type.startsWith('image/') || !/\.(jpg|jpeg|png|webp)$/i.test(screenshotFile.name || '')) {
-              throw new Error('Invalid payment proof format: Only JPG, JPEG, PNG, and WEBP images are allowed.');
+              updateProgressUI(3, 'Invalid file format', 3, '✕ Payment screenshot format error');
+              throw new Error('Payment screenshot upload failed. Only JPG, JPEG, PNG, and WEBP images are allowed.');
             }
-            if (screenshotFile.size > 10 * 1024 * 1024) {
-              throw new Error('Payment proof image size must be 10MB or smaller.');
+            if (screenshotFile.size > 5 * 1024 * 1024) {
+              updateProgressUI(3, 'Image size > 5MB', 3, '✕ Payment screenshot size > 5MB');
+              throw new Error('Payment screenshot upload failed. Image file size must be 5MB or smaller.');
             }
 
             try {
-              screenshotDataUrl = await StorageService.readFileAsDataURL(screenshotFile);
-              const uploadTask = StorageService.uploadPaymentProof(screenshotFile, uniqueOrderId);
-              const uploaded = await withTimeout(uploadTask, 15000, 'Payment proof upload');
-              screenshotUrl = uploaded.url || uploaded.downloadURL || '';
-              screenshotStoragePath = uploaded.storagePath || '';
-              screenshotIdbKey = uploaded.idbKey || '';
-              console.log('[ORDER] Screenshot upload completed:', screenshotUrl);
+              paymentProofObj = await StorageService.uploadPaymentProof(screenshotFile, uniqueOrderId, (progress) => {
+                updateProgressUI(3, `Uploading payment screenshot (${progress}%)...`);
+              });
+              console.log('[ORDER] Direct Storage upload completed:', paymentProofObj.storagePath);
             } catch (imgErr) {
-              console.error('[ORDER ERROR] Screenshot upload failed:', imgErr);
-              throw new Error(`Payment proof upload failed: ${imgErr.message || 'Storage upload error'}`);
+              console.error('[ORDER ERROR] Payment screenshot upload failed:', imgErr);
+              updateProgressUI(3, 'Payment screenshot upload failed', 3, '✕ Payment screenshot upload failed');
+              throw new Error('Payment screenshot upload failed. Please try again.');
             }
           } else {
-            console.log('[ORDER] No payment screenshot attached. Skipping step 2.');
-            updateProgressUI(2, 'No payment proof attached (skipping upload)...');
+            console.log('[ORDER] No payment screenshot attached. Skipping step 3.');
+            updateProgressUI(3, 'No payment proof attached (skipping upload)...');
             await new Promise(r => setTimeout(r, 100));
           }
 
-          // STEP 3: Save order to Firestore
+          // STEP 4: Save order to Firestore
           console.log('[ORDER] Firestore order save started');
-          updateProgressUI(3, 'Syncing order to cloud database...');
+          updateProgressUI(4, 'Saving order to cloud database...');
 
           const quote = updateCalculations();
 
@@ -2011,13 +2061,24 @@ export const PublicViews = {
             id: uniqueOrderId,
             orderId: uniqueOrderId,
             customerName: custName,
+            phone: custPhone,
             customerPhone: custPhone,
+            email: custEmail,
             customerEmail: custEmail,
             customerAddress: custAddress,
+            documents: state.files.map(f => ({
+              fileName: f.name,
+              fileType: f.type || 'application/pdf',
+              fileSize: f.size,
+              storagePath: f.storagePath || '',
+              downloadURL: f.downloadURL || f.url || '',
+              pages: f.pages,
+              options: f.options
+            })),
             files: state.files.map(f => ({
               name: f.name,
               size: f.size,
-              url: f.url,
+              url: f.url || f.downloadURL || '',
               dataUrl: f.dataUrl || '',
               idbKey: f.idbKey || '',
               storagePath: f.storagePath || '',
@@ -2026,7 +2087,32 @@ export const PublicViews = {
               pages: f.pages,
               options: f.options
             })),
-            options: state.files.length > 0 ? state.files[0].options : {},
+            printing: {
+              colorPages: quote.colorPagesCount || 0,
+              bwPages: quote.bwPagesCount || 0,
+              colorRanges: state.files.map(f => f.options?.colorPageRange || '').filter(Boolean).join('; ') || 'None',
+              bwRanges: state.files.map(f => f.options?.pageRange || '').filter(Boolean).join('; ') || 'All',
+              totalPages: (quote.totalColorPrints || 0) + (quote.totalBWPrints || 0),
+              copies: state.files[0]?.options?.copies || 1,
+              paperSize: state.files[0]?.options?.paperSize || 'A4',
+              paperQuality: state.files[0]?.options?.paperQuality || '70 GSM',
+              orientation: state.files[0]?.options?.orientation || 'Portrait',
+              printSide: state.files[0]?.options?.printSide || 'Single',
+              sides: state.files[0]?.options?.printSide || 'Single',
+              binding: Array.from(new Set(state.files.map(f => f.options?.binding).filter(b => b && b !== 'None'))).join(', ') || 'None',
+              finishing: state.files.some(f => f.options?.lamination === 'Yes') ? 'Lamination' : 'None'
+            },
+            accessories: getSelectedProducts().map(p => ({
+              id: p.id,
+              name: p.name,
+              category: p.category || '',
+              icon: p.icon || '🛍️',
+              price: Number(p.price) || 0,
+              quantity: p.quantity,
+              weightGrams: Number(p.weightGrams) || 0,
+              packagingWeightGrams: Number(p.packagingWeightGrams) || 0,
+              subtotal: (Number(p.price) || 0) * p.quantity
+            })),
             products: getSelectedProducts().map(p => ({
               id: p.id,
               name: p.name,
@@ -2038,53 +2124,51 @@ export const PublicViews = {
               packagingWeightGrams: Number(p.packagingWeightGrams) || 0,
               subtotal: (Number(p.price) || 0) * p.quantity
             })),
-            pricing: quote,
-            printing: {
-              paperSize: state.files[0]?.options?.paperSize || 'A4',
-              gsm: state.files[0]?.options?.paperQuality || '70 GSM',
-              colorPages: quote.colorPagesCount || 0,
-              colorCopies: quote.colorCopies || state.files[0]?.options?.colorCopies || state.files[0]?.options?.copies || 1,
-              colorRate: quote.colorPaperRate || 6.00,
-              colorAmount: quote.colorCost || 0,
-              totalColorPrints: quote.totalColorPrints || 0,
-              bwPages: quote.bwPagesCount || 0,
-              bwCopies: quote.bwCopies || state.files[0]?.options?.bwCopies || state.files[0]?.options?.copies || 1,
-              bwRate: quote.basePaperRate || 1.50,
-              bwAmount: quote.paperCost || 0,
-              totalBWPrints: quote.totalBWPrints || 0,
-              totalPrints: (quote.totalColorPrints || 0) + (quote.totalBWPrints || 0),
-              sides: state.files[0]?.options?.printSide || 'Single',
-              binding: Array.from(new Set(state.files.map(f => f.options?.binding).filter(b => b && b !== 'None'))).join(', ') || 'None',
-              lamination: state.files.some(f => f.options?.lamination === 'Yes') ? 'Yes' : 'None'
-            },
-            package: {
+            packageWeight: {
               weightKg: quote.packageWeightKg || 0,
               weightGrams: quote.packageWeightGrams || 0,
               printWeightGrams: quote.printWeightGrams || 0,
               productWeightGrams: quote.productWeightGrams || 0,
               bindingWeightGrams: quote.bindingWeightGrams || 0,
-              packagingWeightGrams: quote.packagingWeightGrams || 0,
-              courierName: settings.courierPricing?.courierName || 'ST Courier',
-              courierCost: quote.internalCourierCost || 0,
-              customerDeliveryCharge: quote.deliveryFee || 0,
-              deliveryType: quote.deliveryType || 'FREE'
+              packagingWeightGrams: quote.packagingWeightGrams || 0
             },
-            paymentScreenshotUrl: screenshotUrl || screenshotDataUrl,
-            paymentScreenshotStoragePath: screenshotStoragePath,
-            paymentStatus: screenshotUrl ? 'Proof Submitted' : 'Waiting Verification',
+            delivery: {
+              type: quote.deliveryType || 'PICKUP',
+              charge: quote.deliveryFee || 0,
+              address: custAddress,
+              deliveryZone: quote.deliveryZone || 'Pickup'
+            },
+            subtotal: quote.total - (quote.deliveryFee || 0),
+            deliveryCharge: quote.deliveryFee || 0,
+            grandTotal: quote.total,
+            pricing: quote,
+            paymentProof: paymentProofObj ? {
+              uploaded: true,
+              storagePath: paymentProofObj.storagePath,
+              downloadURL: paymentProofObj.downloadURL || paymentProofObj.url,
+              fileName: paymentProofObj.fileName,
+              fileSize: paymentProofObj.fileSize,
+              uploadedAt: paymentProofObj.uploadedAt || new Date().toISOString()
+            } : null,
+            paymentScreenshotUrl: paymentProofObj?.downloadURL || paymentProofObj?.url || '',
+            paymentScreenshotStoragePath: paymentProofObj?.storagePath || '',
             payment: {
+              status: paymentProofObj ? 'Proof Submitted' : 'Waiting Verification',
               method: 'UPI QR',
+              amount: quote.total,
               utr: utr,
               payerName: payerName,
-              screenshotUrl: screenshotUrl || screenshotDataUrl,
-              screenshotStoragePath: screenshotStoragePath,
-              paymentScreenshotUrl: screenshotUrl || screenshotDataUrl,
-              paymentScreenshotStoragePath: screenshotStoragePath,
-              screenshotDataUrl: screenshotDataUrl,
-              screenshotIdbKey: screenshotIdbKey,
-              status: screenshotUrl ? 'Proof Submitted' : 'Waiting Verification'
-            }
+              screenshotUrl: paymentProofObj?.downloadURL || paymentProofObj?.url || '',
+              screenshotStoragePath: paymentProofObj?.storagePath || '',
+              paymentProof: paymentProofObj || null
+            },
+            paymentStatus: paymentProofObj ? 'Proof Submitted' : 'Waiting Verification',
+            status: 'Waiting Verification',
+            orderStatus: 'Waiting Verification',
+            createdAt: new Date().toISOString()
           };
+
+          console.log('[ORDER] Final order payload:', orderPayload);
 
           try {
             const createOrderPromise = DBService.createOrder(orderPayload);
@@ -2093,12 +2177,13 @@ export const PublicViews = {
             console.log('[ORDER] Firestore order save completed:', createdOrder.id);
           } catch (dbErr) {
             console.error('[ORDER ERROR] Firestore save failed:', dbErr);
+            updateProgressUI(4, 'Firestore save failed', 4, '✕ Saving order failed');
             throw new Error('Order could not be saved. Please check your internet connection and try again.');
           }
 
-          // STEP 4: Non-blocking Notification Dispatch
+          // STEP 5: Non-blocking Notification Dispatch
           console.log('[ORDER] Notification started');
-          updateProgressUI(4, 'Sending confirmation notification...');
+          updateProgressUI(5, 'Sending confirmation notification...');
 
           (async () => {
             try {
@@ -2111,9 +2196,9 @@ export const PublicViews = {
             }
           })();
 
-          // STEP 5: Order Completed & Success Screen
+          // STEP 6: Order Completed & Success Screen (Rendered ONLY after Firestore save confirmed!)
           console.log('[ORDER] Submission completed');
-          updateProgressUI(5, 'Order completed successfully!');
+          updateProgressUI(6, 'Order completed successfully!');
 
           // Spawn Confetti Particles
           const confettiColors = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4'];
@@ -2137,9 +2222,9 @@ export const PublicViews = {
               <div style="width:88px; height:88px; border-radius:50%; background:linear-gradient(135deg,#10b981,#059669); display:flex; align-items:center; justify-content:center; margin:0 auto 1.5rem; font-size:2.5rem; animation: successPulse 2s ease infinite, popIn 0.5s cubic-bezier(0.34,1.56,0.64,1) both; box-shadow: 0 0 0 0 rgba(16,185,129,0.5);">
                 ✓
               </div>
-              <h2 style="color:#fff; font-size:1.7rem; font-weight:900; margin-bottom:0.5rem; letter-spacing:-0.02em;">Order Submitted Successfully! 🎉</h2>
+              <h2 style="color:#fff; font-size:1.7rem; font-weight:900; margin-bottom:0.5rem; letter-spacing:-0.02em;">Order Placed Successfully! 🎉</h2>
               <p style="color:rgba(255,255,255,0.7); font-size:0.95rem; margin-bottom:1.75rem; line-height:1.6;">
-                Your order <strong style="color:#10b981;">${createdOrder.id}</strong> has been saved. We'll verify your payment and start printing shortly.
+                Your order <strong style="color:#10b981;">${createdOrder.id}</strong> has been saved to our database. We'll verify your payment and start printing shortly.
               </p>
 
               <div style="background:rgba(16,185,129,0.12); border:1.5px solid rgba(16,185,129,0.35); border-radius:14px; padding:1rem 1.25rem; margin-bottom:1.5rem; text-align:left;">
@@ -2153,7 +2238,7 @@ export const PublicViews = {
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.875rem; margin-bottom:0.45rem;">
                   <span style="color:rgba(255,255,255,0.55);">Total Amount</span>
-                  <span style="color:#38bdf8; font-weight:800;">${formatCurrency(createdOrder.pricing?.total)}</span>
+                  <span style="color:#38bdf8; font-weight:800;">${formatCurrency(createdOrder.grandTotal || createdOrder.pricing?.total)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; font-size:0.875rem;">
                   <span style="color:rgba(255,255,255,0.55);">Payment Status</span>
@@ -2162,14 +2247,11 @@ export const PublicViews = {
               </div>
 
               <div style="display:flex; gap:0.65rem; justify-content:center; flex-wrap:wrap;">
-                <button id="overlay-track-btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1); color:#fff; border:none; border-radius:10px; padding:0.75rem 1.25rem; font-size:0.92rem; font-weight:700; cursor:pointer; box-shadow:0 4px 14px rgba(59,130,246,0.4);">
+                <button id="overlay-track-btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1); color:#fff; border:none; border-radius:10px; padding:0.75rem 1.4rem; font-size:0.92rem; font-weight:700; cursor:pointer; box-shadow:0 4px 14px rgba(59,130,246,0.4);">
                   📦 Track Order
                 </button>
-                <button id="overlay-home-btn" style="background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.75rem 1.1rem; font-size:0.92rem; font-weight:600; cursor:pointer;">
+                <button id="overlay-home-btn" style="background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.75rem 1.25rem; font-size:0.92rem; font-weight:600; cursor:pointer;">
                   🏠 Back to Home
-                </button>
-                <button id="overlay-contact-btn" style="background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:0.75rem 1.1rem; font-size:0.92rem; font-weight:600; cursor:pointer;">
-                  📞 Contact Us
                 </button>
               </div>
             </div>
@@ -2182,29 +2264,21 @@ export const PublicViews = {
 
           document.getElementById('overlay-track-btn')?.addEventListener('click', () => navigateAndClean(`#track?id=${createdOrder.id}`));
           document.getElementById('overlay-home-btn')?.addEventListener('click', () => navigateAndClean('#home'));
-          document.getElementById('overlay-contact-btn')?.addEventListener('click', () => navigateAndClean('#contact'));
 
           NotificationService.showToast(`Order ${createdOrder.id} submitted successfully!`, 'success');
 
         } catch (err) {
           console.error('[ORDER ERROR] Submission failed:', err);
 
-          if (loadingOverlay) {
-            loadingOverlay.remove();
-          }
-
           const userErrMsg = err?.message || 'Server connection timed out or failed. Please check your internet connection and try again.';
           NotificationService.showToast(userErrMsg, 'error');
 
         } finally {
-          // If order creation failed, unlock state & re-enable button for retry
+          // If order creation failed before Firestore save, unlock state & re-enable button for retry
           if (!isOrderSavedSuccessfully) {
             isSubmitting = false;
             btnSubmit.disabled = false;
             btnSubmit.innerHTML = originalText;
-            if (document.getElementById('order-submit-overlay')) {
-              document.getElementById('order-submit-overlay')?.remove();
-            }
           }
         }
       };

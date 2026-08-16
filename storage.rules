@@ -11,10 +11,7 @@ service firebase.storage {
                        || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
                        || request.resource.contentType.matches('image/.*'));
 
-      // Allow read access for authenticated admins or direct link holders
       allow read: if true;
-
-      // Allow deletion by admin or automated cleanup routine
       allow delete: if true;
     }
 
@@ -26,19 +23,16 @@ service firebase.storage {
       allow delete: if true;
     }
 
-    // Payment proof path: payments/{orderId}/{fileName}
-    match /payments/{orderId}/{fileName} {
-      allow write: if request.resource.size < 15 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+    // Payment proof path: payment-proofs/{orderId}/{fileName}
+    match /payment-proofs/{orderId}/{fileName} {
+      // Allow customers to upload payment proof images (JPG, JPEG, PNG, WEBP up to 10MB)
+      allow write: if request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
       allow read: if true;
       allow delete: if true;
     }
 
-
-    // AWB slips uploaded by the existing admin application.
-    // NOTE: the current project uses a local admin session rather than Firebase Auth,
-    // so strict request.auth enforcement would break the current frontend. Migrate
-    // admin login to Firebase Auth/custom claims before tightening this rule.
+    // AWB slips uploaded by admin application
     match /awb-slips/{orderId}/{fileName} {
       allow write: if request.resource.size < 15 * 1024 * 1024
                    && (request.resource.contentType.matches('image/.*')

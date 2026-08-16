@@ -33,6 +33,88 @@ async function rtdb() {
 // ── Helper: get Firestore & RTDB service handles ─────────────────────────────
 function svc() { return getServices(); }
 
+const SQL_API_BASE = (window.T7_API_BASE_URL || '/api').replace(/\/$/, '');
+
+function parseServiceData(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch (_) { return {}; }
+}
+
+function normalizeSqlService(row) {
+  const extra = parseServiceData(row.service_data);
+  return normalizeServicePricing({
+    ...extra,
+    ...row,
+    id: row.id,
+    title: row.title || extra.title || '',
+    category: row.category || extra.category || 'General Printing',
+    description: row.description ?? extra.description ?? '',
+    icon: row.icon || extra.icon || '📄',
+    price: row.price ?? extra.price,
+    priceUnit: row.price_unit || extra.priceUnit || extra.price_unit,
+    startingPrice: row.starting_price || extra.startingPrice || '',
+    popular: Number(row.popular) === 1 || row.popular === true || !!extra.popular,
+    status: row.status || extra.status || 'Active',
+    t7ShopEnabled: extra.t7ShopEnabled ?? extra.t7_shop_enabled ?? false,
+    t7ShopCategory: extra.t7ShopCategory ?? extra.t7_shop_category ?? 'design',
+    t7ShopAction: extra.t7ShopAction ?? extra.t7_shop_action ?? 'service',
+    createdAt: row.created_at || extra.createdAt,
+    updatedAt: row.updated_at || extra.updatedAt
+  });
+}
+
+function serviceToSqlPayload(service) {
+  const normalized = normalizeServicePricing(service);
+  const priceMatch = String(normalized.startingPrice || '').match(/([0-9]+(?:\.[0-9]+)?)/);
+  const price = Number.isFinite(Number(normalized.price)) ? Number(normalized.price) : (priceMatch ? Number(priceMatch[1]) : 0);
+  const priceUnit = normalized.priceUnit || (() => {
+    const raw = String(normalized.startingPrice || '');
+    const slash = raw.indexOf('/');
+    return slash >= 0 ? raw.slice(slash + 1).trim() : 'unit';
+  })();
+
+  const serviceData = {
+    ...parseServiceData(normalized.service_data),
+    t7ShopEnabled: !!normalized.t7ShopEnabled,
+    t7ShopCategory: normalized.t7ShopCategory || 'design',
+    t7ShopAction: normalized.t7ShopAction || 'service'
+  };
+
+  return {
+    id: normalized.id,
+    title: normalized.title || '',
+    category: normalized.category || 'General Printing',
+    description: normalized.description || '',
+    icon: normalized.icon || '📄',
+    price,
+    price_unit: priceUnit,
+    starting_price: normalized.startingPrice || `₹${price.toFixed(2)} / ${priceUnit}`,
+    popular: !!normalized.popular,
+    status: normalized.status || 'Active',
+    service_data: serviceData
+  };
+}
+
+async function sqlServicesRequest(path = '', options = {}) {
+  const response = await fetch(`${SQL_API_BASE}/services${path}`, {
+    ...options,
+    headers: {
+      'Accept': 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) {}
+  if (!response.ok) {
+    const message = data?.error || data?.message || `HTTP ${response.status}`;
+    throw new Error(`Services API ${response.status}: ${message}`);
+  }
+  return data;
+}
+
 function normalizeServicePricing(service) {
   const item = { ...service };
   if (item.price === undefined || item.price === null || item.price === '') {
@@ -423,16 +505,16 @@ export const DBService = {
   // ══════════════════════════════════════════════════════════════════════
 
   async createOrder(orderData) {
-    const newId     = 'ORD-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
-    const firstFile = orderData.files?.[0] || {};
-    const createdAt = new Date().toISOString();
+    const newId     = orderData.id || orderData.orderId || ('ORD-' + new Date().getFullYear() + '-' + Math.floor(100000 + Math.random() * 900000));
+    const firstFile = orderData.files?.[0] || orderData.documents?.[0] || {};
+    const createdAt = orderData.createdAt || new Date().toISOString();
 
     const newOrder = {
       id:              newId,
       orderId:         newId,
       customerName:    orderData.customerName    || 'Customer',
-      customerPhone:   orderData.customerPhone   || '',
-      customerEmail:   orderData.customerEmail   || '',
+      customerPhone:   orderData.phone || orderData.customerPhone   || '',
+      customerEmail:   orderData.email || orderData.customerEmail   || '',
       customerAddress: orderData.customerAddress || '',
       fileName:        firstFile.fileName || firstFile.name || 'document.pdf',
       fileType:        firstFile.fileType || firstFile.type || 'application/pdf',
@@ -442,37 +524,49 @@ export const DBService = {
       uploadedAt:      firstFile.uploadedAt || createdAt,
       uploadStatus:    firstFile.uploadStatus || 'uploaded',
       expiresAt:       firstFile.expiresAt || new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+      documents:       orderData.documents || orderData.files || [],
+      files:           orderData.files || orderData.documents || [],
       printSettings:   orderData.options || {},
-      totalAmount:     orderData.pricing?.total || 0,
-      paymentStatus:   'Waiting Verification',
-      orderStatus:     'Waiting Verification',
-      status:          'Waiting Verification',
+      totalAmount:     orderData.grandTotal || orderData.pricing?.total || orderData.totalAmount || 0,
+      paymentStatus:   orderData.paymentStatus || 'Waiting Verification',
+      orderStatus:     orderData.orderStatus || 'Waiting Verification',
+      status:          orderData.status || 'Waiting Verification',
       createdAt,
       updatedAt:       createdAt,
       estimatedReady:  new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
       ...orderData
     };
 
-    // 1. Update in-memory cache immediately (UI sees it instantly)
-    if (_ordersCache) _ordersCache.unshift(newOrder);
-    else _ordersCache = [newOrder];
+    // 1. Update in-memory cache
+    if (_ordersCache) {
+      const existingIdx = _ordersCache.findIndex(o => o.id === newId || o.orderId === newId);
+      if (existingIdx !== -1) {
+        _ordersCache[existingIdx] = newOrder;
+      } else {
+        _ordersCache.unshift(newOrder);
+      }
+    } else {
+      _ordersCache = [newOrder];
+    }
 
-    // 2. Parallel writes to Firestore + RTDB (non-blocking)
+    // 2. Await Firestore write confirmation
     const { db, firebaseApp, isDemo } = svc();
     if (!isDemo && firebaseApp) {
-      Promise.allSettled([
-        db ? (async () => {
-          const { doc, setDoc } = await fs();
-          await setDoc(doc(db, 'orders', newId), this.sanitizeForCloud(newOrder, true));
-          console.log('✅ Firestore:', newId);
-        })() : Promise.resolve(),
-        (async () => {
+      if (db) {
+        const { doc, setDoc } = await fs();
+        await setDoc(doc(db, 'orders', newId), this.sanitizeForCloud(newOrder, true));
+        console.log('✅ Firestore order saved successfully:', newId);
+      }
+      (async () => {
+        try {
           const { getDatabase, ref, set } = await rtdb();
           const db2 = getDatabase(firebaseApp);
           await set(ref(db2, 'orders/' + newId), this.sanitizeForCloud(newOrder, false));
-          console.log('✅ RTDB:', newId);
-        })()
-      ]).catch(e => console.warn('Cloud write:', e));
+          console.log('✅ RTDB order synced:', newId);
+        } catch (e) {
+          console.warn('RTDB sync warning:', e);
+        }
+      })();
     }
 
     return newOrder;
@@ -1018,95 +1112,56 @@ export const DBService = {
   },
 
   // ══════════════════════════════════════════════════════════════════════
-  //  SERVICE CATALOG — Firestore backed, memory cached
+  //  SERVICE CATALOG — MySQL API backed, memory cached
+  //  Firebase remains available for the rest of the application.
   // ══════════════════════════════════════════════════════════════════════
 
   getServicesCatalogSync() {
-    return _catalogCache || DEFAULT_SERVICES;
+    return _catalogCache || DEFAULT_SERVICES.map(s => normalizeServicePricing({ category: 'General Printing', status: 'Active', ...s }));
   },
 
   async getServicesCatalog() {
     if (_catalogCache) return _catalogCache;
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { collection, getDocs } = await fs();
-        const snap = await getDocs(collection(db, 'services'));
-        if (!snap.empty) {
-          _catalogCache = snap.docs.map(d => normalizeServicePricing({ id: d.id, ...d.data() }));
-          return _catalogCache;
-        }
-      } catch (e) {
-        console.warn('Catalog fetch:', e);
-      }
+
+    try {
+      const data = await sqlServicesRequest();
+      const rows = Array.isArray(data) ? data : (Array.isArray(data?.services) ? data.services : []);
+      _catalogCache = rows.map(normalizeSqlService);
+      window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
+      return _catalogCache;
+    } catch (e) {
+      console.warn('[SERVICES] MySQL API fetch error:', e);
     }
-    // Seed with defaults
+
+    // Safe UI fallback if the SQL API is temporarily unavailable.
     _catalogCache = DEFAULT_SERVICES.map(s => normalizeServicePricing({ category: 'General Printing', status: 'Active', ...s }));
-    if (!isDemo && db) {
-      (async () => {
-        try {
-          const { doc, setDoc } = await fs();
-          for (const item of _catalogCache) {
-            if (item.id) await setDoc(doc(db, 'services', item.id), item);
-          }
-        } catch (e) {}
-      })();
-    }
     return _catalogCache;
   },
 
   async saveCatalogItem(serviceData) {
+    const payload = serviceToSqlPayload(serviceData);
+    const isUpdate = !!payload.id;
+    const data = await sqlServicesRequest(isUpdate ? `/${encodeURIComponent(payload.id)}` : '', {
+      method: isUpdate ? 'PUT' : 'POST',
+      body: JSON.stringify(payload)
+    });
+
+    const row = data?.service || data?.data || data?.item || data;
+    const saved = normalizeSqlService(row);
     const catalog = await this.getServicesCatalog();
-    let targetItem = null;
-
-    if (serviceData.id) {
-      const idx = catalog.findIndex(s => s.id === serviceData.id);
-      if (idx !== -1) {
-        catalog[idx] = { ...catalog[idx], ...serviceData };
-        targetItem = catalog[idx];
-      }
-    }
-
-    if (!targetItem) {
-      targetItem = {
-        id:       'srv-' + Date.now(),
-        category: serviceData.category || 'General Printing',
-        status:   serviceData.status   || 'Active',
-        popular:  !!serviceData.popular,
-        icon:     serviceData.icon     || '📄',
-        ...serviceData
-      };
-      catalog.unshift(targetItem);
-    }
-
-    targetItem = normalizeServicePricing(targetItem);
-    const targetIndex = catalog.findIndex(s => s.id === targetItem.id);
-    if (targetIndex !== -1) catalog[targetIndex] = targetItem;
-
+    const idx = catalog.findIndex(s => s.id === saved.id);
+    if (idx >= 0) catalog[idx] = saved;
+    else catalog.unshift(saved);
     _catalogCache = catalog;
-
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, setDoc } = await fs();
-        await setDoc(doc(db, 'services', targetItem.id), targetItem);
-      } catch (e) { console.warn('Save catalog item:', e); }
-    }
     window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
-    return targetItem;
+    return saved;
   },
 
   async deleteCatalogItem(serviceId) {
-    const catalog = await this.getServicesCatalog();
-    _catalogCache = catalog.filter(s => s.id !== serviceId);
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, deleteDoc } = await fs();
-        await deleteDoc(doc(db, 'services', serviceId));
-      } catch (e) {}
-    }
-    window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
+    if (!serviceId) throw new Error('Service ID is required');
+    await sqlServicesRequest(`/${encodeURIComponent(serviceId)}`, { method: 'DELETE' });
+    if (_catalogCache) _catalogCache = _catalogCache.filter(s => s.id !== serviceId);
+    window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache || [] }));
     return true;
   },
 

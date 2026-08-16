@@ -8,7 +8,7 @@ export const firebaseConfig = {
   authDomain: "printing-app-9a63f.firebaseapp.com",
   databaseURL: "https://printing-app-9a63f-default-rtdb.firebaseio.com",
   projectId: "printing-app-9a63f",
-  storageBucket: "printing-app-9a63f.firebasestorage.app",
+  storageBucket: "printing-app-9a63f.appspot.com",
   messagingSenderId: "10036391737",
   appId: "1:10036391737:web:ef9686abd9655defbf82e8"
 };
@@ -53,7 +53,7 @@ export async function initFirebase() {
       auth        = getAuth(firebaseApp);
       storage     = getStorage(firebaseApp);
 
-      console.log('⚡ Firebase initialized (parallel load).');
+      console.log('⚡ Firebase initialized. Storage Bucket:', storage?.app?.options?.storageBucket || firebaseConfig.storageBucket);
       return { firebaseApp, db, auth, storage, mode: 'FIREBASE' };
     } catch (err) {
       firebaseInitError = err;

@@ -204,9 +204,11 @@
 /* Order Wizard Layout */
 .wizard-container {
   display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 2.5rem;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 2rem;
   align-items: start;
+  width: min(1400px, calc(100% - 40px));
+  margin: 0 auto;
 }
 
 .wizard-steps-bar {
