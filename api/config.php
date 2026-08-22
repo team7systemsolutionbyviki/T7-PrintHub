@@ -9,7 +9,7 @@ if (file_exists(__DIR__ . '/config.local.php')) {
 
 if (!defined('DB_HOST')) define('DB_HOST', 'localhost');
 if (!defined('DB_PORT')) define('DB_PORT', '3306');
-if (!defined('DB_NAME')) define('DB_NAME', 'u700928676_t7_printhub');
+if (!defined('DB_NAME')) define('DB_NAME', 'u700928676_t7printhub');
 if (!defined('DB_USER')) define('DB_USER', 'u700928676_t7_admin');
 if (!defined('DB_PASSWORD')) define('DB_PASSWORD', 'viki1101@VIKI');
 
