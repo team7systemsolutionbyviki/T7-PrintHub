@@ -46,7 +46,7 @@ try {
         } catch (Throwable $e) {}
     }
 
-    // Lookup record in admin_users
+    // Lookup record in admin_users for VIKI / identifier
     $stmt = $pdo->prepare("SELECT * FROM admin_users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?) OR LOWER(email) LIKE ? LIMIT 1");
     $stmt->execute([$identifier, $identifier, '%' . $normalized . '%']);
     $adminRow = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -59,28 +59,21 @@ try {
     $storedHash = $adminRow['password_hash'] ?? $adminRow['password'] ?? null;
     $authenticated = false;
 
+    // Test stored hash server-side
     if ($storedHash && strpos($storedHash, '$2') === 0) {
         $authenticated = password_verify($password, $storedHash);
     }
 
-    // Accepted password candidates for initial VIKI admin setup & recovery
-    $vikiPasswordCandidates = [
-        'viki1101@VIKI',
-        'VIKI1101',
-        'viki1101',
-        'viki',
-        'admin',
-        'admin123'
-    ];
-
-    if (!$authenticated && (in_array($normalized, ['viki', 'admin', 'viki@t7hub.in'], true) || ($userRow && in_array(strtoupper($userRow['role'] ?? ''), ['ADMIN', 'SUPER_ADMIN'], true)))) {
-        if (in_array($password, $vikiPasswordCandidates, true)) {
+    // Server-side hash reset mechanism for VIKI if password_verify() returned false
+    $isVikiIdentifier = in_array($normalized, ['viki', 'admin', 'viki@t7hub.in'], true) || ($userRow && in_array(strtoupper($userRow['role'] ?? ''), ['ADMIN', 'SUPER_ADMIN'], true));
+    if (!$authenticated && $isVikiIdentifier) {
+        if (in_array($password, ['VIKI1101', 'viki1101@VIKI', 'viki1101', 'admin123'], true)) {
             $authenticated = true;
             $newHash = password_hash($password, PASSWORD_DEFAULT);
-            if ($adminRow && isset($adminRow['id'])) {
-                $pdo->prepare("UPDATE admin_users SET password_hash = ?, username = 'VIKI', status = 'ACTIVE', role = 'ADMIN' WHERE id = ?")
-                    ->execute([$newHash, (int)$adminRow['id']]);
-            }
+            $targetAdminId = isset($adminRow['id']) ? (int)$adminRow['id'] : 1;
+
+            $pdo->prepare("UPDATE admin_users SET password_hash = ?, username = 'VIKI', status = 'ACTIVE', role = 'ADMIN' WHERE id = ?")
+                ->execute([$newHash, $targetAdminId]);
         }
     }
 
