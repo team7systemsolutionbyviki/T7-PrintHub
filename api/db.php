@@ -11,11 +11,11 @@ function getDbConnection() {
 
     if ($pdo === null) {
         $hosts = [];
-        if (defined('DB_HOST') && DB_HOST !== 'YOUR_HOSTINGER_DB_HOST') {
+        if (defined('DB_HOST') && !empty(DB_HOST)) {
             $hosts[] = DB_HOST;
         }
-        $hosts[] = 'localhost';
         $hosts[] = '127.0.0.1';
+        $hosts[] = 'localhost';
 
         $lastError = null;
 
@@ -32,13 +32,13 @@ function getDbConnection() {
                 $pdo = new PDO($dsn, DB_USER, DB_PASSWORD, $options);
                 break;
             } catch (PDOException $e) {
-                $lastError = $e->getMessage();
+                $lastError = $host . ': ' . $e->getMessage();
             }
         }
 
         if ($pdo === null) {
             error_log("[Database Connection Error]: " . $lastError);
-            sendError('Database connection failed. Please check hostinger MySQL configuration.', 500);
+            sendError('Database connection failed: ' . $lastError, 500);
         }
     }
 
