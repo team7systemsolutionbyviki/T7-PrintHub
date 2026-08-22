@@ -1,0 +1,7 @@
+{
+  "name": "team7-printing-backend-notice",
+  "version": "1.0.0",
+  "description": "T7 PrintHub Backend Notice (Migrated to Node.js Express API on Hostinger VPS)",
+  "main": "index.js",
+  "private": true
+}

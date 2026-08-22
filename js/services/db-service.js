@@ -1,866 +1,446 @@
 /* ==========================================================================
    TEAM 7 SYSTEM SOLUTION - DATABASE SERVICE
-   Firebase-Only Engine (Firestore + Realtime Database)
-   In-memory cache for instant UI — Firebase is the single source of truth
+   PHP 8.x + MySQL Backend Engine (Hostinger Shared Hosting Compatible).
+   Zero Node.js / Firestore / Realtime Database dependencies.
    ========================================================================== */
 
 import { getServices } from '../config/firebase-config.js';
-import { DEFAULT_SETTINGS, DEFAULT_PRICING, DEFAULT_SERVICES, DEFAULT_PRODUCTS } from '../config/default-data.js';
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_PRICING,
+  DEFAULT_SERVICES,
+  DEFAULT_PRODUCTS,
+  DEFAULT_SERVICE_CATEGORIES,
+  DEFAULT_PRODUCT_CATEGORIES
+} from '../config/default-data.js';
 
-// ── In-memory caches (zero-latency on second access, no localStorage) ───────
-let _ordersCache   = null;   // Array<Order>  | null
-let _settingsCache = null;   // Object        | null
-let _pricingCache  = null;   // Object        | null
-let _catalogCache  = null;   // Array<Service>| null
-let _productsCache = null;   // Array<Product>| null
-let _cloudSyncBusy = false;
+// In-memory caches for fast UI rendering
+let _ordersCache = null;
+let _settingsCache = null;
+let _pricingCache = null;
+let _catalogCache = null;
+let _productsCache = null;
+let _serviceBookingsCache = null;
 
-// ── Lazy-load Firebase module references (cached by JS engine) ───────────────
-let _fsModule   = null;   // Firestore module
-let _rtdbModule = null;   // RTDB module
-
-async function fs() {
-  if (!_fsModule) _fsModule = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
-  return _fsModule;
+async function getAuthToken() {
+  const { auth } = getServices();
+  if (auth && auth.currentUser) {
+    try {
+      return await auth.currentUser.getIdToken();
+    } catch (e) {
+      console.warn("Failed to get Firebase Auth ID token:", e);
+    }
+  }
+  return null;
 }
-async function rtdb() {
-  if (!_rtdbModule) _rtdbModule = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js');
-  return _rtdbModule;
-}
 
-// ── Helper: get Firestore & RTDB service handles ─────────────────────────────
-function svc() { return getServices(); }
+async function apiRequest(endpoint, options = {}) {
+  const token = await getAuthToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
 
-function normalizeServicePricing(service) {
-  const item = { ...service };
-  if (item.price === undefined || item.price === null || item.price === '') {
-    const match = String(item.startingPrice || '').match(/([0-9]+(?:\.[0-9]+)?)/);
-    if (match) item.price = Number(match[1]);
-  } else {
-    item.price = Number(item.price) || 0;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
-  if (!item.priceUnit) {
-    const raw = String(item.startingPrice || '');
-    const slash = raw.indexOf('/');
-    item.priceUnit = slash >= 0 ? raw.slice(slash + 1).trim() : 'unit';
+
+  const response = await fetch(endpoint, {
+    ...options,
+    headers
+  });
+
+  if (!response.ok) {
+    let errorMsg = `API Request failed with HTTP ${response.status}`;
+    try {
+      const errRes = await response.json();
+      if (errRes.message) errorMsg = errRes.message;
+      else if (errRes.error) errorMsg = errRes.error;
+    } catch (e) {}
+    throw new Error(errorMsg);
   }
-  if (!item.startingPrice && Number.isFinite(item.price)) {
-    item.startingPrice = `₹${item.price.toFixed(2)} / ${item.priceUnit || 'unit'}`;
+
+  const json = await response.json();
+  if (json && json.success === false) {
+    throw new Error(json.message || 'API request failed');
   }
-  return item;
+
+  return json;
 }
 
 export const DBService = {
-
-  // No-op: kept for call-site compatibility — Firebase handles its own init
   initLocalStore() {},
 
   // ══════════════════════════════════════════════════════════════════════
-  //  SETTINGS — Single source of truth: Firestore settings/general
-  //  Priority: Firebase server data > in-memory cache > DEFAULT_SETTINGS
-  //  DEFAULT_SETTINGS is a fallback ONLY — never overwrites Firebase data.
+  // SETTINGS
   // ══════════════════════════════════════════════════════════════════════
-
-  // Singleton guard — prevents duplicate onSnapshot listeners
-  _settingsUnsubscribe: null,
-
-  // Synchronous getter for instant first-paint rendering (< 1ms).
-  // Uses cached data if available, otherwise falls back to defaults.
-  // Views that call this MUST handle the settingsUpdated event to re-render
-  // with fresh Firebase data when the snapshot arrives.
   getSettingsSync() {
     if (_settingsCache) {
-      console.log('[SETTINGS] SOURCE: CACHE', _settingsCache);
       return { ...DEFAULT_SETTINGS, ..._settingsCache };
     }
-    console.log('[SETTINGS] SOURCE: DEFAULT', DEFAULT_SETTINGS);
     return { ...DEFAULT_SETTINGS };
   },
 
-  // Async getter — fetches directly from Firestore SERVER, bypasses local SDK cache.
-  // forceRefresh=true (used at startup) clears in-memory cache so Firebase is always queried.
-  // NEVER call this after getSettingsSync() has been called for first-render — use getSettingsSync()
-  // only after _settingsCache has been warmed by this function.
   async getSettings(forceRefresh = false) {
-    if (forceRefresh) {
-      _settingsCache = null;
-    }
-
-    // Return in-memory cache if it was already populated from Firebase
-    if (_settingsCache) {
-      console.log('[SETTINGS] SOURCE: CACHE', _settingsCache);
-      return { ...DEFAULT_SETTINGS, ..._settingsCache };
-    }
-
-    const { db, isDemo } = svc();
-
-    // Fetch from Firestore — use source:'server' to bypass Firestore's own local cache
-    if (!isDemo && db) {
-      try {
-        const { doc, getDoc } = await fs();
-        const docRef = doc(db, 'settings', 'general');
-        // source:'server' forces a network round-trip, ignoring Firestore's memory/IndexedDB cache
-        const snap = await getDoc(docRef, { source: 'server' }).catch(() => getDoc(docRef));
-
-        if (snap && snap.exists()) {
-          _settingsCache = { ...DEFAULT_SETTINGS, ...snap.data() };
-          console.log('[SETTINGS] SOURCE: FIREBASE', snap.data());
-          console.log('[SETTINGS] FINAL', _settingsCache);
-          return _settingsCache;
-        }
-      } catch (e) {
-        console.warn('[SETTINGS] Firestore fetch error:', e);
-      }
-    }
-
-    // Last resort fallback — Firebase unavailable (no connection, demo mode, etc.)
-    _settingsCache = { ...DEFAULT_SETTINGS };
-    console.log('[SETTINGS] SOURCE: DEFAULT (Firebase unavailable)', DEFAULT_SETTINGS);
-    console.log('[SETTINGS] FINAL', _settingsCache);
-    return _settingsCache;
-  },
-
-  // Save ALL settings to Firestore with { merge: true }.
-  // After saving: clears cache, then lets onSnapshot repopulate from server.
-  async saveSettings(settings) {
-    const { db, isDemo } = svc();
-
-    // Build the merged settings object (new values win)
-    const merged = { ...DEFAULT_SETTINGS, ..._settingsCache, ...settings };
-
-    if (!isDemo && db) {
-      try {
-        const { doc, setDoc } = await fs();
-        // { merge: true } prevents deleting any existing Firestore fields
-        await setDoc(doc(db, 'settings', 'general'), merged, { merge: true });
-        console.log('[SETTINGS] Saved to Firebase:', merged);
-      } catch (e) {
-        console.warn('[SETTINGS] Save error:', e);
-        throw e;
-      }
-    }
-
-    // Update in-memory cache with the freshly saved values
-    _settingsCache = merged;
-
-    // Notify all pages/components of the update
-    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: _settingsCache }));
-    return _settingsCache;
-  },
-
-  // Real-time Firestore listener — SINGLETON. Only ONE listener ever exists.
-  // Fires ONLY for server-confirmed data (ignores fromCache snapshots) so
-  // there is no race between old local-cache data and fresh server data.
-  async onSettingsSnapshot(callback) {
-    // Unsubscribe any existing listener before creating a new one (singleton pattern)
-    if (this._settingsUnsubscribe) {
-      try { this._settingsUnsubscribe(); } catch (e) {}
-      this._settingsUnsubscribe = null;
-    }
-
-    const { db, isDemo } = svc();
-    if (isDemo || !db) return null;
+    if (!forceRefresh && _settingsCache) return { ...DEFAULT_SETTINGS, ..._settingsCache };
 
     try {
-      const { doc, onSnapshot } = await fs();
-      const settingsRef = doc(db, 'settings', 'general');
-
-      this._settingsUnsubscribe = onSnapshot(
-        settingsRef,
-        { includeMetadataChanges: true }, // Required to check fromCache flag
-        (snap) => {
-          // CRITICAL: Skip snapshots served from Firestore's local cache.
-          // Only accept confirmed server data to prevent alternating old/new values.
-          if (snap.metadata.fromCache) {
-            console.log('[SETTINGS] Skipping cached snapshot (waiting for server data)');
-            return;
-          }
-
-          if (!snap.exists()) {
-            console.log('[SETTINGS] No settings document in Firestore');
-            return;
-          }
-
-          // Server-confirmed data — always overrides defaults
-          const serverData = snap.data();
-          _settingsCache = { ...DEFAULT_SETTINGS, ...serverData };
-
-          console.log('[SETTINGS] SOURCE: FIREBASE (real-time server)', serverData);
-          console.log('[SETTINGS] FINAL', _settingsCache);
-
-          window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: _settingsCache }));
-          if (typeof callback === 'function') callback(_settingsCache);
-        },
-        (err) => {
-          console.warn('[SETTINGS] Snapshot listener error:', err);
-        }
-      );
-
-      return this._settingsUnsubscribe;
-    } catch (e) {
-      console.warn('[SETTINGS] Could not start snapshot listener:', e);
-      return null;
-    }
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  PRICING
-  // ══════════════════════════════════════════════════════════════════════
-
-  async getPricing() {
-    if (_pricingCache) return _pricingCache;
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, getDoc } = await fs();
-        const snap = await getDoc(doc(db, 'settings', 'pricing'));
-        if (snap.exists()) {
-          _pricingCache = snap.data();
-          return _pricingCache;
-        }
-      } catch (e) {}
-    }
-    _pricingCache = { ...DEFAULT_PRICING };
-    return _pricingCache;
-  },
-
-  async savePricing(pricing) {
-    _pricingCache = { ...pricing };
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, setDoc } = await fs();
-        await setDoc(doc(db, 'settings', 'pricing'), pricing);
-      } catch (e) {
-        console.warn('Save pricing error:', e);
+      const res = await apiRequest('/api/settings/get.php');
+      const settingsData = res.data || res.settings;
+      if (settingsData && typeof settingsData === 'object') {
+        _settingsCache = settingsData;
+        return { ...DEFAULT_SETTINGS, ..._settingsCache };
       }
+    } catch (err) {
+      console.warn('[DBService] getSettings API warning:', err.message);
     }
-    return true;
+    return this.getSettingsSync();
   },
 
-  // ══════════════════════════════════════════════════════════════════════
-  //  ORDER MERGE HELPER
-  // ══════════════════════════════════════════════════════════════════════
-
-  mergeOrderObjects(existing, incoming) {
-    if (!existing) return incoming;
-    if (!incoming) return existing;
-    const merged = { ...existing, ...incoming };
-
-    // Smart-merge files array
-    if (existing.files || incoming.files) {
-      const l1 = existing.files || [], l2 = incoming.files || [];
-      const max = Math.max(l1.length, l2.length);
-      const mergedFiles = [];
-      for (let i = 0; i < max; i++) {
-        const f1 = l1[i] || {}, f2 = l2[i] || {};
-        const u1 = f1.url || f1.dataUrl || '', u2 = f2.url || f2.dataUrl || '';
-        let bestUrl = u1;
-        if (u2.startsWith('https://') || u2.startsWith('http://')) bestUrl = u2;
-        else if (u1.startsWith('https://') || u1.startsWith('http://')) bestUrl = u1;
-        else if (u2.length > u1.length) bestUrl = u2;
-        const bestData  = (f2.dataUrl && f2.dataUrl.length > 500) ? f2.dataUrl : (f1.dataUrl || (bestUrl.startsWith('data:') ? bestUrl : ''));
-        const bestPath  = f2.storagePath || f1.storagePath || '';
-        mergedFiles.push({ ...f1, ...f2, url: bestUrl, dataUrl: bestData, storagePath: bestPath });
-      }
-      merged.files = mergedFiles;
-    }
-
-    // Smart-merge payment screenshot
-    if (existing.payment || incoming.payment) {
-      const p1 = existing.payment || {}, p2 = incoming.payment || {};
-      const s1 = p1.screenshotUrl || p1.screenshotDataUrl || '';
-      const s2 = p2.screenshotUrl || p2.screenshotDataUrl || '';
-      const best = s2.length > s1.length ? s2 : (s1 || s2);
-      merged.payment = {
-        ...p1, ...p2,
-        screenshotUrl:     best,
-        screenshotDataUrl: p2.screenshotDataUrl || p1.screenshotDataUrl || (best.startsWith('data:') ? best : '')
-      };
-    }
-    return merged;
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  GET ALL ORDERS — Firebase only, parallel fetch, memory cache
-  // ══════════════════════════════════════════════════════════════════════
-
-  async getOrders(forceRefresh = false) {
-    // 1. Return in-memory cache immediately unless forceRefresh requested
-    if (_ordersCache && !forceRefresh) return _ordersCache;
-
-    const { db, firebaseApp, isDemo } = svc();
-
-    if (isDemo || !firebaseApp) {
-      _ordersCache = _ordersCache || [];
-      return _ordersCache;
-    }
-
-    // 2. Parallel fetch from Firestore + RTDB
-    _cloudSyncBusy = true;
+  async saveSettings(newSettings) {
     try {
-      const map = new Map();
-
-      const [fsResult, rtResult] = await Promise.allSettled([
-        // Firestore
-        (async () => {
-          if (!db) return [];
-          const { collection, getDocs, query, orderBy } = await fs();
-          const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-          const snap = await getDocs(q);
-          return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        })(),
-        // Realtime Database
-        (async () => {
-          const { getDatabase, ref, get } = await rtdb();
-          const db2 = getDatabase(firebaseApp);
-          const snap = await get(ref(db2, 'orders'));
-          if (!snap.exists()) return [];
-          return Object.entries(snap.val()).map(([id, o]) => ({ id, ...o }));
-        })()
-      ]);
-
-      if (fsResult.status === 'fulfilled') {
-        fsResult.value.forEach(o => map.set(o.id, this.mergeOrderObjects(map.get(o.id), o)));
-      }
-      if (rtResult.status === 'fulfilled') {
-        rtResult.value.forEach(o => map.set(o.id, this.mergeOrderObjects(map.get(o.id), o)));
-      }
-
-      _ordersCache = Array.from(map.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    } catch (e) {
-      console.warn('getOrders error:', e);
-      _ordersCache = _ordersCache || [];
-    } finally {
-      _cloudSyncBusy = false;
+      const merged = { ...this.getSettingsSync(), ...newSettings };
+      const res = await apiRequest('/api/settings/update.php', {
+        method: 'POST',
+        body: JSON.stringify(merged)
+      });
+      _settingsCache = res.data || merged;
+      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: _settingsCache }));
+      return _settingsCache;
+    } catch (err) {
+      console.error('[DBService] saveSettings error:', err);
+      throw err;
     }
-
-    return _ordersCache;
   },
 
-  invalidateOrdersCache() {
-    _ordersCache = null;
+  onSettingsSnapshot(callback) {
+    if (typeof callback === 'function') {
+      window.addEventListener('settingsUpdated', (e) => callback(e.detail));
+    }
+    return Promise.resolve();
+  },
+
+  onSettingsSnap(callback) {
+    return this.onSettingsSnapshot(callback);
   },
 
   // ══════════════════════════════════════════════════════════════════════
-  //  SEARCH & GET BY ID
+  // SERVICES CATALOG
   // ══════════════════════════════════════════════════════════════════════
-
-  async searchOrders(queryStr, forceRefresh = false) {
-    const orders = await this.getOrders(forceRefresh);
-    const q = queryStr.trim().toLowerCase();
-    return orders.filter(o =>
-      (o.id && o.id.toLowerCase().includes(q)) ||
-      (o.orderId && o.orderId.toLowerCase().includes(q)) ||
-      (o.customerPhone || '').includes(q) ||
-      (o.customerName || '').toLowerCase().includes(q)
-    );
-  },
-
-  async getOrderById(orderId, forceRefresh = false) {
-    // Try cache first if forceRefresh is false
-    if (_ordersCache && !forceRefresh) {
-      const found = _ordersCache.find(o => o.id === orderId || o.orderId === orderId);
-      if (found) return found;
-    }
-    // Direct Firestore lookup (fast single-doc read)
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, getDoc } = await fs();
-        const snap = await getDoc(doc(db, 'orders', orderId));
-        if (snap.exists()) {
-          const freshDoc = { id: snap.id, ...snap.data() };
-          if (_ordersCache) {
-            const idx = _ordersCache.findIndex(o => o.id === orderId || o.orderId === orderId);
-            if (idx !== -1) _ordersCache[idx] = this.mergeOrderObjects(_ordersCache[idx], freshDoc);
-            else _ordersCache.unshift(freshDoc);
-          }
-          return freshDoc;
-        }
-      } catch (e) {}
-    }
-    return null;
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  SANITIZE FOR CLOUD (keep large dataUrls; strip from Firestore if huge)
-  // ══════════════════════════════════════════════════════════════════════
-
-  sanitizeForCloud(order, isFirestore = false) {
-    if (!order) return order;
-    try {
-      const cloud = JSON.parse(JSON.stringify(order));
-      if (cloud.files && Array.isArray(cloud.files)) {
-        cloud.files.forEach(f => {
-          const url = f.url || f.dataUrl || '';
-          if (url.startsWith('https://') || url.startsWith('http://')) {
-            f.url = url;
-            delete f.dataUrl;
-          } else if (url.startsWith('data:')) {
-            if (isFirestore && url.length > 800000) {
-              f.url = f.storagePath ? '' : url;
-              if (f.storagePath && f.dataUrl) delete f.dataUrl;
-            } else {
-              f.url = url;
-              f.dataUrl = url;
-            }
-          }
-        });
-      }
-      if (cloud.payment) {
-        const scr = cloud.payment.screenshotUrl || cloud.payment.screenshotDataUrl || '';
-        if (scr) { cloud.payment.screenshotUrl = scr; cloud.payment.screenshotDataUrl = scr; }
-      }
-      return cloud;
-    } catch (e) { return order; }
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  CREATE ORDER — instant memory update + parallel Firebase writes
-  // ══════════════════════════════════════════════════════════════════════
-
-  async createOrder(orderData) {
-    const newId     = 'ORD-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
-    const firstFile = orderData.files?.[0] || {};
-    const createdAt = new Date().toISOString();
-
-    const newOrder = {
-      id:              newId,
-      orderId:         newId,
-      customerName:    orderData.customerName    || 'Customer',
-      customerPhone:   orderData.customerPhone   || '',
-      customerEmail:   orderData.customerEmail   || '',
-      customerAddress: orderData.customerAddress || '',
-      fileName:        firstFile.fileName || firstFile.name || 'document.pdf',
-      fileType:        firstFile.fileType || firstFile.type || 'application/pdf',
-      fileSize:        firstFile.fileSize || firstFile.size || 'N/A',
-      storagePath:     firstFile.storagePath || null,
-      downloadURL:     firstFile.downloadURL || firstFile.url || null,
-      uploadedAt:      firstFile.uploadedAt || createdAt,
-      uploadStatus:    firstFile.uploadStatus || 'uploaded',
-      expiresAt:       firstFile.expiresAt || new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-      printSettings:   orderData.options || {},
-      totalAmount:     orderData.pricing?.total || 0,
-      paymentStatus:   'Waiting Verification',
-      orderStatus:     'Waiting Verification',
-      status:          'Waiting Verification',
-      createdAt,
-      updatedAt:       createdAt,
-      estimatedReady:  new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-      ...orderData
-    };
-
-    // 1. Update in-memory cache immediately (UI sees it instantly)
-    if (_ordersCache) _ordersCache.unshift(newOrder);
-    else _ordersCache = [newOrder];
-
-    // 2. Parallel writes to Firestore + RTDB (non-blocking)
-    const { db, firebaseApp, isDemo } = svc();
-    if (!isDemo && firebaseApp) {
-      Promise.allSettled([
-        db ? (async () => {
-          const { doc, setDoc } = await fs();
-          await setDoc(doc(db, 'orders', newId), this.sanitizeForCloud(newOrder, true));
-          console.log('✅ Firestore:', newId);
-        })() : Promise.resolve(),
-        (async () => {
-          const { getDatabase, ref, set } = await rtdb();
-          const db2 = getDatabase(firebaseApp);
-          await set(ref(db2, 'orders/' + newId), this.sanitizeForCloud(newOrder, false));
-          console.log('✅ RTDB:', newId);
-        })()
-      ]).catch(e => console.warn('Cloud write:', e));
-    }
-
-    return newOrder;
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  UPDATE ORDER STATUS — instant memory + parallel cloud writes
-  // ══════════════════════════════════════════════════════════════════════
-
-  async updateOrderStatus(orderId, newStatus, isLocked = null) {
-    const orders = _ordersCache || (await this.getOrders());
-    const idx    = orders.findIndex(o => o.id === orderId || o.orderId === orderId);
-
-    const updatedAt = new Date().toISOString();
-    let isStatusLocked = isLocked;
-    if (isStatusLocked === null && (newStatus === 'Completed' || newStatus === 'Rejected')) {
-      isStatusLocked = true;
-    }
-
-    if (idx !== -1) {
-      orders[idx].status      = newStatus;
-      orders[idx].orderStatus = newStatus;
-      orders[idx].updatedAt   = updatedAt;
-      if (isStatusLocked !== null) orders[idx].isStatusLocked = isStatusLocked;
-      if (newStatus === 'Payment Approved' && orders[idx].payment) {
-        orders[idx].payment.status = 'Verified';
-      }
-      _ordersCache = orders;
-    }
-
-    // Firestore update payload (supports dot notation)
-    const fsUpdateObj = {
-      status:      newStatus,
-      orderStatus: newStatus,
-      updatedAt
-    };
-    if (isStatusLocked !== null && isStatusLocked !== undefined) fsUpdateObj.isStatusLocked = isStatusLocked;
-    if (newStatus === 'Payment Approved') fsUpdateObj['payment.status'] = 'Verified';
-
-    // RTDB update payload (slash notation for nested paths)
-    const rtdbUpdateObj = {
-      status:      newStatus,
-      orderStatus: newStatus,
-      updatedAt
-    };
-    if (isStatusLocked !== null && isStatusLocked !== undefined) rtdbUpdateObj.isStatusLocked = isStatusLocked;
-    if (newStatus === 'Payment Approved') rtdbUpdateObj['payment/status'] = 'Verified';
-
-    // Parallel Firebase writes
-    const { db, firebaseApp, isDemo } = svc();
-    if (!isDemo && firebaseApp) {
-      try {
-        await Promise.allSettled([
-          db ? (async () => {
-            const { doc, updateDoc } = await fs();
-            await updateDoc(doc(db, 'orders', orderId), fsUpdateObj);
-          })() : Promise.resolve(),
-          (async () => {
-            const { getDatabase, ref, update } = await rtdb();
-            const db2 = getDatabase(firebaseApp);
-            await update(ref(db2, 'orders/' + orderId), rtdbUpdateObj);
-          })()
-        ]);
-      } catch (e) {
-        console.warn('Status sync error:', e);
-      }
-    }
-
-    return idx !== -1 ? orders[idx] : { id: orderId, status: newStatus, orderStatus: newStatus };
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  COURIER / AWB DISPATCH
-  // ══════════════════════════════════════════════════════════════════════
-
-  async updateOrderCourier(orderId, courierData) {
-    const orders = _ordersCache || (await this.getOrders());
-    const idx = orders.findIndex(o => o.id === orderId || o.orderId === orderId);
-    const updatedAt = new Date().toISOString();
-    const existing = idx !== -1 ? (orders[idx].courier || {}) : {};
-
-    const courier = {
-      ...existing,
-      ...courierData,
-      updatedAt
-    };
-
-    if (idx !== -1) {
-      orders[idx].courier = courier;
-      orders[idx].updatedAt = updatedAt;
-      _ordersCache = orders;
-    }
-
-    const { db, firebaseApp, isDemo } = svc();
-    if (!isDemo && firebaseApp) {
-      try {
-        const writes = [];
-        if (db) {
-          writes.push((async () => {
-            const { doc, updateDoc } = await fs();
-            await updateDoc(doc(db, 'orders', orderId), {
-              courier,
-              updatedAt
-            });
-          })());
-        }
-        writes.push((async () => {
-          const { getDatabase, ref, update } = await rtdb();
-          const db2 = getDatabase(firebaseApp);
-          await update(ref(db2, 'orders/' + orderId), {
-            courier,
-            updatedAt
-          });
-        })());
-        await Promise.allSettled(writes);
-      } catch (e) {
-        console.warn('[COURIER] Sync error:', e);
-        throw e;
-      }
-    }
-
-    return idx !== -1 ? orders[idx] : { id: orderId, courier };
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  DELETE ORDER — instant memory remove + parallel cloud delete
-  // ══════════════════════════════════════════════════════════════════════
-
-  deleteOrder(orderId) {
-    // Instant memory remove
-    if (_ordersCache) _ordersCache = _ordersCache.filter(o => o.id !== orderId);
-
-    // Parallel Firebase deletes (non-blocking)
-    (async () => {
-      const { db, firebaseApp, isDemo } = svc();
-      if (!isDemo && firebaseApp) {
-        await Promise.allSettled([
-          db ? (async () => {
-            const { doc, deleteDoc } = await fs();
-            await deleteDoc(doc(db, 'orders', orderId));
-          })() : Promise.resolve(),
-          (async () => {
-            const { getDatabase, ref, remove } = await rtdb();
-            const db2 = getDatabase(firebaseApp);
-            await remove(ref(db2, 'orders/' + orderId));
-          })()
-        ]);
-      }
-    })();
-
-    return true;
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  UPDATE ORDER IN CLOUD (used by storage cleanup callback)
-  // ══════════════════════════════════════════════════════════════════════
-
-  async updateOrderInCloud(order) {
-    if (!order?.id) return;
-    const { db, firebaseApp, isDemo } = svc();
-    if (isDemo || !firebaseApp) return;
-    await Promise.allSettled([
-      db ? (async () => {
-        const { doc, setDoc } = await fs();
-        await setDoc(doc(db, 'orders', order.id), this.sanitizeForCloud(order, true));
-      })() : Promise.resolve(),
-      (async () => {
-        const { getDatabase, ref, set } = await rtdb();
-        const db2 = getDatabase(firebaseApp);
-        await set(ref(db2, 'orders/' + order.id), this.sanitizeForCloud(order, false));
-      })()
-    ]);
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  CUSTOMERS (aggregate from live order cache)
-  // ══════════════════════════════════════════════════════════════════════
-
-  async getCustomers() {
-    const orders = await this.getOrders();
-    const map = {};
-    orders.forEach(o => {
-      const phone = o.customerPhone || 'unknown';
-      if (!map[phone]) {
-        map[phone] = {
-          name:          o.customerName,
-          phone:         o.customerPhone,
-          email:         o.customerEmail || 'N/A',
-          totalOrders:   0,
-          totalSpent:    0,
-          lastOrderDate: o.createdAt
-        };
-      }
-      map[phone].totalOrders += 1;
-      if (o.status !== 'Rejected') map[phone].totalSpent += (o.pricing?.total || 0);
-      if (new Date(o.createdAt) > new Date(map[phone].lastOrderDate)) map[phone].lastOrderDate = o.createdAt;
-    });
-    return Object.values(map);
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  PRODUCTS / STATIONERY CATALOG — Firestore backed, memory cached
-  // ══════════════════════════════════════════════════════════════════════
-
-  getProductsCatalogSync() {
-    return _productsCache || DEFAULT_PRODUCTS;
-  },
-
-  async getProductsCatalog() {
-    if (_productsCache) return _productsCache;
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { collection, getDocs } = await fs();
-        const snap = await getDocs(collection(db, 'products'));
-        if (!snap.empty) {
-          _productsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          return _productsCache;
-        }
-      } catch (e) {
-        console.warn('[PRODUCTS] Fetch error:', e);
-      }
-    }
-
-    // Seed defaults only when the products collection is empty/unavailable.
-    _productsCache = DEFAULT_PRODUCTS.map(p => ({ ...p }));
-    if (!isDemo && db) {
-      try {
-        const { doc, setDoc } = await fs();
-        for (const item of _productsCache) {
-          await setDoc(doc(db, 'products', item.id), item, { merge: true });
-        }
-      } catch (e) {
-        console.warn('[PRODUCTS] Seed error:', e);
-      }
-    }
-    window.dispatchEvent(new CustomEvent('productsUpdated', { detail: _productsCache }));
-    return _productsCache;
-  },
-
-  async saveProductItem(productData) {
-    const products = await this.getProductsCatalog();
-    let targetItem = null;
-
-    if (productData.id) {
-      const idx = products.findIndex(p => p.id === productData.id);
-      if (idx !== -1) {
-        products[idx] = { ...products[idx], ...productData };
-        targetItem = products[idx];
-      }
-    }
-
-    if (!targetItem) {
-      targetItem = {
-        id: productData.id || 'prod-' + Date.now(),
-        name: productData.name || 'New Product',
-        category: productData.category || 'Accessory',
-        price: Number(productData.price) || 0,
-        icon: productData.icon || '📦',
-        stockStatus: productData.stockStatus || 'In Stock',
-        description: productData.description || '',
-        popular: !!productData.popular,
-        status: productData.status || 'Active',
-        ...productData
-      };
-      products.unshift(targetItem);
-    }
-
-    _productsCache = products;
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, setDoc } = await fs();
-        await setDoc(doc(db, 'products', targetItem.id), targetItem, { merge: true });
-      } catch (e) {
-        console.warn('[PRODUCTS] Save error:', e);
-        throw e;
-      }
-    }
-    window.dispatchEvent(new CustomEvent('productsUpdated', { detail: _productsCache }));
-    return targetItem;
-  },
-
-  async deleteProductItem(productId) {
-    const products = await this.getProductsCatalog();
-    _productsCache = products.filter(p => p.id !== productId);
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, deleteDoc } = await fs();
-        await deleteDoc(doc(db, 'products', productId));
-      } catch (e) {
-        console.warn('[PRODUCTS] Delete error:', e);
-        throw e;
-      }
-    }
-    window.dispatchEvent(new CustomEvent('productsUpdated', { detail: _productsCache }));
-    return true;
-  },
-
-  // ══════════════════════════════════════════════════════════════════════
-  //  SERVICE CATALOG — Firestore backed, memory cached
-  // ══════════════════════════════════════════════════════════════════════
-
   getServicesCatalogSync() {
     return _catalogCache || DEFAULT_SERVICES;
   },
 
-  async getServicesCatalog() {
-    if (_catalogCache) return _catalogCache;
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { collection, getDocs } = await fs();
-        const snap = await getDocs(collection(db, 'services'));
-        if (!snap.empty) {
-          _catalogCache = snap.docs.map(d => normalizeServicePricing({ id: d.id, ...d.data() }));
-          return _catalogCache;
-        }
-      } catch (e) {
-        console.warn('Catalog fetch:', e);
+  async getServicesCatalog(forceRefresh = false) {
+    if (!forceRefresh && _catalogCache) return _catalogCache;
+
+    try {
+      const res = await apiRequest('/api/services/list.php?all=1');
+      const servicesList = res.data || res.services;
+      if (Array.isArray(servicesList)) {
+        _catalogCache = servicesList.map(s => ({
+          ...s,
+          price: Number(s.price) || 0,
+          startingPrice: s.starting_price !== undefined ? Number(s.starting_price) : Number(s.price) || 0,
+          priceLabel: s.price_label || s.priceLabel || `Starting from ₹${s.starting_price || s.price}`
+        }));
+        return _catalogCache;
       }
+    } catch (err) {
+      console.warn('[DBService] getServicesCatalog API warning:', err.message);
     }
-    // Seed with defaults
-    _catalogCache = DEFAULT_SERVICES.map(s => normalizeServicePricing({ category: 'General Printing', status: 'Active', ...s }));
-    if (!isDemo && db) {
-      (async () => {
-        try {
-          const { doc, setDoc } = await fs();
-          for (const item of _catalogCache) {
-            if (item.id) await setDoc(doc(db, 'services', item.id), item);
-          }
-        } catch (e) {}
-      })();
-    }
-    return _catalogCache;
+    return this.getServicesCatalogSync();
   },
 
-  async saveCatalogItem(serviceData) {
-    const catalog = await this.getServicesCatalog();
-    let targetItem = null;
+  async saveServiceItem(serviceData) {
+    try {
+      const isUpdate = !!serviceData.id && !String(serviceData.id).startsWith('temp-');
+      const endpoint = isUpdate ? '/api/services/update.php' : '/api/services/create.php';
 
-    if (serviceData.id) {
-      const idx = catalog.findIndex(s => s.id === serviceData.id);
-      if (idx !== -1) {
-        catalog[idx] = { ...catalog[idx], ...serviceData };
-        targetItem = catalog[idx];
-      }
-    }
-
-    if (!targetItem) {
-      targetItem = {
-        id:       'srv-' + Date.now(),
-        category: serviceData.category || 'General Printing',
-        status:   serviceData.status   || 'Active',
-        popular:  !!serviceData.popular,
-        icon:     serviceData.icon     || '📄',
-        ...serviceData
+      const payload = {
+        ...serviceData,
+        price: Number(serviceData.price) || 0,
+        starting_price: serviceData.startingPrice !== undefined ? Number(serviceData.startingPrice) : Number(serviceData.price) || 0,
+        price_label: serviceData.priceLabel || serviceData.startingPriceLabel || `Starting from ₹${serviceData.price}`
       };
-      catalog.unshift(targetItem);
+
+      const res = await apiRequest(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+
+      await this.getServicesCatalog(true);
+      return res.data || res.service;
+    } catch (err) {
+      console.error('[DBService] saveServiceItem error:', err);
+      throw err;
     }
-
-    targetItem = normalizeServicePricing(targetItem);
-    const targetIndex = catalog.findIndex(s => s.id === targetItem.id);
-    if (targetIndex !== -1) catalog[targetIndex] = targetItem;
-
-    _catalogCache = catalog;
-
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, setDoc } = await fs();
-        await setDoc(doc(db, 'services', targetItem.id), targetItem);
-      } catch (e) { console.warn('Save catalog item:', e); }
-    }
-    window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
-    return targetItem;
   },
 
-  async deleteCatalogItem(serviceId) {
-    const catalog = await this.getServicesCatalog();
-    _catalogCache = catalog.filter(s => s.id !== serviceId);
-    const { db, isDemo } = svc();
-    if (!isDemo && db) {
-      try {
-        const { doc, deleteDoc } = await fs();
-        await deleteDoc(doc(db, 'services', serviceId));
-      } catch (e) {}
+  async deleteServiceItem(serviceId) {
+    try {
+      await apiRequest('/api/services/delete.php', {
+        method: 'POST',
+        body: JSON.stringify({ id: serviceId })
+      });
+      await this.getServicesCatalog(true);
+      return true;
+    } catch (err) {
+      console.error('[DBService] deleteServiceItem error:', err);
+      throw err;
     }
-    window.dispatchEvent(new CustomEvent('catalogUpdated', { detail: _catalogCache }));
-    return true;
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // PRODUCTS CATALOG
+  // ══════════════════════════════════════════════════════════════════════
+  getProductsCatalogSync() {
+    return _productsCache || DEFAULT_PRODUCTS;
+  },
+
+  async getProductsCatalog(forceRefresh = false) {
+    if (!forceRefresh && _productsCache) return _productsCache;
+
+    try {
+      const res = await apiRequest('/api/products/list.php?all=1');
+      const productsList = res.data || res.products;
+      if (Array.isArray(productsList)) {
+        _productsCache = productsList.map(p => ({
+          ...p,
+          price: Number(p.price) || 0,
+          salePrice: p.sale_price !== null ? Number(p.sale_price) : null,
+          stock: Number(p.stock) || 0
+        }));
+        return _productsCache;
+      }
+    } catch (err) {
+      console.warn('[DBService] getProductsCatalog API warning:', err.message);
+    }
+    return this.getProductsCatalogSync();
+  },
+
+  async saveProductItem(productData) {
+    try {
+      const isUpdate = !!productData.id && !String(productData.id).startsWith('temp-');
+      const endpoint = isUpdate ? '/api/products/update.php' : '/api/products/create.php';
+
+      console.log("CREATE PRODUCT PAYLOAD:", productData);
+
+      const res = await apiRequest(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(productData)
+      });
+
+      await this.getProductsCatalog(true);
+      return res.data || res.product;
+    } catch (err) {
+      console.error('[DBService] saveProductItem error:', err);
+      throw err;
+    }
+  },
+
+  async deleteProductItem(productId) {
+    try {
+      await apiRequest('/api/products/delete.php', {
+        method: 'POST',
+        body: JSON.stringify({ id: productId })
+      });
+      await this.getProductsCatalog(true);
+      return true;
+    } catch (err) {
+      console.error('[DBService] deleteProductItem error:', err);
+      throw err;
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // BOOKINGS (PRINTING & HARDWARE)
+  // ══════════════════════════════════════════════════════════════════════
+  async getServiceBookings(forceRefresh = false) {
+    if (!forceRefresh && _serviceBookingsCache) return _serviceBookingsCache;
+
+    try {
+      const res = await apiRequest('/api/bookings/list.php');
+      const list = res.data || res.bookings;
+      if (Array.isArray(list)) {
+        _serviceBookingsCache = list;
+        return _serviceBookingsCache;
+      }
+    } catch (err) {
+      console.warn('[DBService] getServiceBookings API warning:', err.message);
+    }
+    return _serviceBookingsCache || [];
+  },
+
+  async getBookingById(bookingId) {
+    try {
+      const res = await apiRequest(`/api/bookings/get.php?id=${encodeURIComponent(bookingId)}`);
+      return res.data || res.booking || null;
+    } catch (err) {
+      console.warn('[DBService] getBookingById API warning:', err.message);
+    }
+    return null;
+  },
+
+  async createServiceBooking(bookingData) {
+    try {
+      const res = await apiRequest('/api/bookings/create.php', {
+        method: 'POST',
+        body: JSON.stringify(bookingData)
+      });
+
+      const booking = res.data || res.booking;
+      if (booking) {
+        await this.getServiceBookings(true);
+        return booking;
+      }
+      throw new Error('Failed to create booking.');
+    } catch (err) {
+      console.error('[DBService] createServiceBooking error:', err);
+      throw err;
+    }
+  },
+
+  async updateBookingStatus(bookingId, status, advanceAmount = null) {
+    try {
+      const res = await apiRequest('/api/bookings/update.php', {
+        method: 'POST',
+        body: JSON.stringify({ id: bookingId, status, advance_amount: advanceAmount })
+      });
+      await this.getServiceBookings(true);
+      return res.data || res.booking;
+    } catch (err) {
+      console.error('[DBService] updateBookingStatus error:', err);
+      throw err;
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // STORE ORDERS
+  // ══════════════════════════════════════════════════════════════════════
+  async getOrders(forceRefresh = false) {
+    if (!forceRefresh && _ordersCache) return _ordersCache;
+
+    try {
+      const res = await apiRequest('/api/orders/list.php');
+      const list = res.data || res.orders;
+      if (Array.isArray(list)) {
+        _ordersCache = list;
+        return _ordersCache;
+      }
+    } catch (err) {
+      console.warn('[DBService] getOrders API warning:', err.message);
+    }
+    return _ordersCache || [];
+  },
+
+  async getOrderById(orderId) {
+    try {
+      const res = await apiRequest(`/api/orders/get.php?id=${encodeURIComponent(orderId)}`);
+      return res.data || res.order || null;
+    } catch (err) {
+      console.warn('[DBService] getOrderById API warning:', err.message);
+    }
+    return null;
+  },
+
+  async createOrder(orderData) {
+    try {
+      const res = await apiRequest('/api/orders/create.php', {
+        method: 'POST',
+        body: JSON.stringify(orderData)
+      });
+
+      const order = res.data || res.order;
+      if (order) {
+        await this.getOrders(true);
+        return order;
+      }
+      throw new Error('Failed to create order.');
+    } catch (err) {
+      console.error('[DBService] createOrder error:', err);
+      throw err;
+    }
+  },
+
+  async updateOrderStatus(orderId, status, isFinal = false) {
+    try {
+      const res = await apiRequest('/api/orders/update.php', {
+        method: 'POST',
+        body: JSON.stringify({ id: orderId, status })
+      });
+      await this.getOrders(true);
+      return res.data || res.order;
+    } catch (err) {
+      console.error('[DBService] updateOrderStatus error:', err);
+      throw err;
+    }
+  },
+
+  async updateOrderCourier(orderId, courierData) {
+    try {
+      return await this.updateOrderStatus(orderId, 'SHIPPED');
+    } catch (err) {
+      console.error('[DBService] updateOrderCourier error:', err);
+      throw err;
+    }
+  },
+
+  async deleteOrder(orderId) {
+    try {
+      await apiRequest('/api/orders/update.php', {
+        method: 'POST',
+        body: JSON.stringify({ id: orderId, status: 'CANCELLED' })
+      });
+      await this.getOrders(true);
+      return true;
+    } catch (err) {
+      console.error('[DBService] deleteOrder error:', err);
+      throw err;
+    }
+  },
+
+  async searchOrders(queryStr) {
+    const orders = await this.getOrders();
+    const q = String(queryStr || '').toLowerCase().trim();
+    if (!q) return orders;
+
+    return orders.filter(o =>
+      String(o.order_number || o.id).toLowerCase().includes(q) ||
+      String(o.user_phone || '').includes(q) ||
+      String(o.user_email || '').toLowerCase().includes(q)
+    );
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  // CUSTOMERS & PRICING
+  // ══════════════════════════════════════════════════════════════════════
+  async getCustomers() {
+    try {
+      const res = await apiRequest('/api/customers/list.php');
+      return res.data || [];
+    } catch (err) {
+      return [];
+    }
+  },
+
+  async getPricing() {
+    if (_pricingCache) return _pricingCache;
+    return DEFAULT_PRICING;
+  },
+
+  async savePricing(pricingData) {
+    _pricingCache = pricingData;
+    return _pricingCache;
+  },
+
+  async getDashboardStats() {
+    try {
+      const res = await apiRequest('/api/admin/dashboard.php');
+      return res.data || {};
+    } catch (err) {
+      console.warn('[DBService] getDashboardStats warning:', err);
+      return {};
+    }
   }
 };

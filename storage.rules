@@ -2,49 +2,84 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Order original files path: orders/{orderId}/original/{fileName}
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.active != false
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in ['ADMIN', 'SUPER_ADMIN'];
+    }
+
+    function allowedDocumentType() {
+      return request.resource.contentType.matches('application/pdf')
+        || request.resource.contentType.matches('application/msword')
+        || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        || request.resource.contentType.matches('image/.*');
+    }
+
     match /orders/{orderId}/original/{fileName} {
-      // Allow customers to upload original files (PDF, DOC, DOCX, JPG, PNG, WEBP up to 200MB)
-      allow write: if request.resource.size < 200 * 1024 * 1024
-                   && (request.resource.contentType.matches('application/pdf')
-                       || request.resource.contentType.matches('application/msword')
-                       || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-                       || request.resource.contentType.matches('image/.*'));
-
-      // Allow read access for authenticated admins or direct link holders
+      allow create, update: if request.resource.size < 200 * 1024 * 1024
+                            && allowedDocumentType();
+      // Tokenized download URLs may be shared with the customer.
       allow read: if true;
-
-      // Allow deletion by admin or automated cleanup routine
-      allow delete: if true;
+      allow delete: if isAdmin();
     }
 
-    // Payment receipts path: receipts/{fileName}
     match /receipts/{fileName} {
-      allow write: if request.resource.size < 15 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+      allow create, update: if request.resource.size < 15 * 1024 * 1024
+                            && request.resource.contentType.matches('image/.*');
       allow read: if true;
-      allow delete: if true;
+      allow delete: if isAdmin();
     }
 
-
-    // AWB slips uploaded by the existing admin application.
-    // NOTE: the current project uses a local admin session rather than Firebase Auth,
-    // so strict request.auth enforcement would break the current frontend. Migrate
-    // admin login to Firebase Auth/custom claims before tightening this rule.
     match /awb-slips/{orderId}/{fileName} {
-      allow write: if request.resource.size < 15 * 1024 * 1024
-                   && (request.resource.contentType.matches('image/.*')
-                       || request.resource.contentType == 'application/pdf');
+      allow create, update: if isAdmin()
+                            && request.resource.size < 15 * 1024 * 1024
+                            && (request.resource.contentType.matches('image/.*')
+                                || request.resource.contentType == 'application/pdf');
       allow read: if true;
-      allow delete: if true;
+      allow delete: if isAdmin();
     }
 
-    // Default fallback paths for general shop assets
-    match /uploads/{fileName} {
-      allow read, write: if true;
+    match /service_docs/{bookingId}/{fileName} {
+      allow create, update: if request.resource.size < 20 * 1024 * 1024
+                            && allowedDocumentType();
+      allow read: if true;
+      allow delete: if isAdmin();
     }
+
+    match /product_images/{productId}/{fileName} {
+      allow create, update: if isAdmin()
+                            && request.resource.size < 10 * 1024 * 1024
+                            && (request.resource.contentType.matches('image/jpeg')
+                                || request.resource.contentType.matches('image/png')
+                                || request.resource.contentType.matches('image/webp'));
+      allow read: if true;
+      allow delete: if isAdmin();
+    }
+
+    match /product_images/{fileName} {
+      allow create, update: if isAdmin()
+                            && request.resource.size < 10 * 1024 * 1024
+                            && request.resource.contentType.matches('image/.*');
+      allow read: if true;
+      allow delete: if isAdmin();
+    }
+
+    // General shop assets must be managed by an authenticated admin.
+    match /uploads/{fileName} {
+      allow read: if true;
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
     match /customer_docs/{fileName} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if signedIn();
+      allow delete: if isAdmin();
     }
   }
 }

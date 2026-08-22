@@ -3,7 +3,7 @@
    ========================================================================== */
 
 import { DEFAULT_SERVICES, FAQS } from '../config/default-data.js';
-import { AuthService } from '../services/auth-service.js';
+import { AuthService } from '../services/auth-service.js?v=20260822_2';
 import { DBService } from '../services/db-service.js';
 import { PricingEngine } from '../services/pricing-engine.js';
 import { StorageService } from '../services/storage-service.js';
@@ -1152,84 +1152,79 @@ export const PublicViews = {
         }
       }
 
-      // Step 1: Render Animated Processing Screen
-      statusBox.innerHTML = `
-        <div style="background:var(--bg-card); border:2px dashed var(--primary); border-radius:14px; padding:1.5rem; text-align:center; box-shadow:var(--shadow-md);" class="animate-fade-in">
-          <div style="display:inline-block; font-size:2.75rem; margin-bottom:0.5rem; animation: spin 1.5s linear infinite;">⚙️</div>
-          <h4 style="font-size:1.15rem; font-weight:700; color:var(--primary); margin-bottom:0.25rem;">Processing & Scanning PDF Files...</h4>
-          <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">Reading page count, parsing PDF structure & storing locally for high-speed printing...</p>
-          
-          <!-- Animated Progress Bar -->
-          <div style="width:100%; height:12px; background:var(--bg-body); border-radius:20px; overflow:hidden; border:1px solid var(--border-color); margin-bottom:0.75rem;">
-            <div id="pdf-progress-bar" style="width: 20%; height:100%; background:linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%); transition: width 0.25s ease;"></div>
-          </div>
-          
-          <div style="display:flex; justify-content:space-between; font-size:0.82rem; font-weight:600; color:var(--text-muted);">
-            <span id="pdf-progress-text">Processing: ${validFiles[0].name}...</span>
-            <span id="pdf-progress-percent">20%</span>
-          </div>
-        </div>
-      `;
+      statusBox.style.display = 'block';
 
-      const updateProgress = (pct, filename) => {
-        const bar = document.getElementById('pdf-progress-bar');
-        const txt = document.getElementById('pdf-progress-text');
-        const perc = document.getElementById('pdf-progress-percent');
-        if (bar) bar.style.width = pct + '%';
-        if (txt && filename) txt.innerText = `Processing: ${filename}...`;
-        if (perc) perc.innerText = pct + '%';
+      const updateProgress = (pct, fname, currentIdx, totalCount) => {
+        if (!statusBox) return;
+        statusBox.style.display = 'block';
+        statusBox.innerHTML = `
+          <div style="background:var(--bg-card); border:2px solid var(--primary); border-radius:14px; padding:1.25rem; text-align:center;">
+            <div style="font-size:0.875rem; font-weight:800; color:var(--primary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:0.35rem;">
+              ☁️ Uploading ${currentIdx} of ${totalCount} to Google Drive
+            </div>
+            <div style="font-weight:700; font-size:1.05rem; margin-bottom:0.75rem; color:var(--text-main); word-break:break-all;">${fname}</div>
+            <div style="width:100%; height:12px; background:var(--bg-main); border-radius:999px; overflow:hidden; border:1px solid var(--border-color);">
+              <div id="up-progress-bar" style="width:${pct}%; height:100%; background:linear-gradient(90deg, var(--primary), var(--accent)); transition:width 0.2s ease;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:0.5rem; font-size:0.8rem; color:var(--text-muted);">
+              <span>Google Drive Cloud Sync</span>
+              <b id="up-progress-perc" style="color:var(--primary);">${pct}%</b>
+            </div>
+          </div>
+        `;
       };
 
       let newlyUploadedCount = 0;
+      const totalToUpload = validFiles.length;
+
       for (let i = 0; i < validFiles.length; i++) {
         const file = validFiles[i];
 
-        // 1. Validate file format and 200MB size limit
+        // 1. Validate file format and size limit
         const val = StorageService.validateFile(file);
         if (!val.valid) {
           NotificationService.showToast(val.error, 'error');
           continue;
         }
 
-        updateProgress(5, file.name);
+        updateProgress(5, file.name, i + 1, totalToUpload);
 
         try {
           const estPages = await StorageService.estimatePdfPages(file);
 
-          // 2. Perform Resumable Upload to Firebase Storage with live progress callback
-          const uploaded = await StorageService.uploadFileResumable(file, 'orders', (pct) => {
-            updateProgress(pct, file.name);
+          // 2. Perform Upload to Hostinger VPS File Storage via Express API
+          const uploaded = await StorageService.uploadFileResumable(file, 'other', (pct) => {
+            updateProgress(pct, file.name, i + 1, totalToUpload);
           });
 
           state.files.push({
+            fileId: uploaded.fileId || uploaded.id || '',
+            originalName: file.name,
             fileName: file.name,
             name: file.name,
             fileType: file.type || 'application/pdf',
             type: file.type || 'application/pdf',
             fileSize: uploaded.fileSize || StorageService.formatBytes(file.size),
             size: uploaded.fileSize || StorageService.formatBytes(file.size),
-            storagePath: uploaded.storagePath || '',
             downloadURL: uploaded.downloadURL || uploaded.url || '',
             url: uploaded.downloadURL || uploaded.url || '',
-            dataUrl: uploaded.dataUrl || '',
-            idbKey: uploaded.idbKey || '',
-            uploadStatus: 'uploaded',
+            uploadStatus: 'UPLOADED',
+            status: 'UPLOADED',
             uploadedAt: uploaded.uploadedAt || new Date().toISOString(),
-            expiresAt: uploaded.expiresAt || new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
             pages: estPages || 1,
             options: defaultFileOptions(estPages || 1)
           });
           newlyUploadedCount++;
         } catch (err) {
-          console.error('File upload error:', err);
-          NotificationService.showToast(`Upload failed for ${file.name}. Please check network and retry.`, 'error');
+          console.error('Google Drive Upload Error:', err);
+          NotificationService.showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
           statusBox.innerHTML = `
             <div style="background:rgba(239,68,68,0.1); border:2px solid #ef4444; border-radius:14px; padding:1.25rem; text-align:center;">
-              <h4 style="color:#dc2626; font-weight:800;">❌ Upload Failed</h4>
+              <h4 style="color:#dc2626; font-weight:800;">❌ Google Drive Upload Failed</h4>
               <p style="font-size:0.875rem; color:var(--text-main); margin-top:0.35rem;">
-                Could not upload <b>${file.name}</b> to online storage. Please check your internet connection.
+                Could not upload <b>${file.name}</b> to Google Drive storage: ${err.message}
               </p>
-              <button class="btn btn-danger mt-2" onclick="document.getElementById('file-input').click()">🔄 Select File & Retry Upload</button>
+              <button class="btn btn-danger mt-2" onclick="document.getElementById('file-input').click()">🔄 Retry Upload</button>
             </div>
           `;
           return;

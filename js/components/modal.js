@@ -31,6 +31,21 @@ export const ModalComponent = {
     };
   },
 
+  open(bodyHTMLOrOptions, options = {}) {
+    if (typeof bodyHTMLOrOptions === 'object' && bodyHTMLOrOptions !== null) {
+      return this.show(bodyHTMLOrOptions);
+    }
+    const title = options.title || 'Notification';
+    const width = options.width || '680px';
+    const footerHTML = options.footerHTML || '';
+    return this.show({
+      title,
+      bodyHTML: bodyHTMLOrOptions,
+      footerHTML,
+      width
+    });
+  },
+
   close() {
     const existing = document.getElementById('active-modal-overlay');
     if (existing) {

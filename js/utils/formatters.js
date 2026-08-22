@@ -2,8 +2,20 @@
    TEAM 7 SYSTEM SOLUTION - FORMATTERS & HELPERS
    ========================================================================== */
 
+export function normalizePrice(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/[^\d.]/g, '');
+    const num = parseFloat(cleaned);
+    return Number.isFinite(num) ? num : 0;
+  }
+  return 0;
+}
+
 export function formatCurrency(amount) {
-  const num = Number(amount) || 0;
+  const num = normalizePrice(amount);
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',

@@ -2,7 +2,7 @@
    TEAM 7 SYSTEM SOLUTION - ADMIN VIEWS MODULE
    ========================================================================== */
 
-import { AuthService } from '../services/auth-service.js';
+import { AuthService } from '../services/auth-service.js?v=20260822_2';
 import { DBService } from '../services/db-service.js';
 import { StorageService } from '../services/storage-service.js';
 import { AWBDispatchService } from '../services/awb-dispatch-service.js';
@@ -12,7 +12,22 @@ import { ChartsEngine } from '../components/charts.js';
 import { InvoiceComponent } from '../components/invoice.js';
 import { ModalComponent } from '../components/modal.js';
 import { formatCurrency, getStatusBadgeHTML, formatDate, formatTime } from '../utils/formatters.js';
-import { exportToCSV } from '../utils/export-excel.js';
+function esc(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatServicePrice(service) {
+  const price = Number(service?.price);
+  const unit = String(service?.priceUnit || '').trim();
+  if (Number.isFinite(price) && unit) return `₹${price.toFixed(2)} / ${unit}`;
+  return service?.startingPrice || 'Price on request';
+}
 
 export const AdminViews = {
   // --- ADMIN LOGIN PAGE ---
@@ -48,12 +63,14 @@ export const AdminViews = {
       e.preventDefault();
       const email = document.getElementById('login-email').value.trim();
       const password = document.getElementById('login-password').value.trim();
-      const res = await AuthService.loginAdmin(email, password);
-      if (res.success) {
-        NotificationService.showToast('Welcome back, Administrator!', 'success');
-        window.location.hash = '#admin-dashboard';
-      } else {
-        NotificationService.showToast(res.message, 'error');
+      try {
+        const res = await AuthService.loginAdmin(email, password);
+        if (res && res.success) {
+          NotificationService.showToast('Welcome back, Administrator!', 'success');
+          window.location.hash = '#admin-dashboard';
+        }
+      } catch (err) {
+        NotificationService.showToast(err.message || 'Login failed. Please check your credentials.', 'error');
       }
     };
   },
@@ -86,13 +103,25 @@ export const AdminViews = {
               <span class="sidebar-link-icon">📊</span> Overview Dashboard
             </a>
             <a href="#admin-orders" class="sidebar-link ${activeTab === 'orders' ? 'active' : ''}">
-              <span class="sidebar-link-icon">📄</span> Order Pipeline
+              <span class="sidebar-link-icon">📄</span> Print Orders Pipeline
+            </a>
+            <a href="#admin-services" class="sidebar-link ${activeTab === 'services' ? 'active' : ''}">
+              <span class="sidebar-link-icon">🛠️</span> Services & Categories
+            </a>
+            <a href="#admin-bookings" class="sidebar-link ${activeTab === 'bookings' ? 'active' : ''}">
+              <span class="sidebar-link-icon">📅</span> Service Bookings
+            </a>
+            <a href="#admin-technicians" class="sidebar-link ${activeTab === 'technicians' ? 'active' : ''}">
+              <span class="sidebar-link-icon">👨‍🔧</span> Staff / Technicians
+            </a>
+            <a href="#admin-shop" class="sidebar-link ${activeTab === 'shop' ? 'active' : ''}">
+              <span class="sidebar-link-icon">🛍️</span> Shop Products & Stock
+            </a>
+            <a href="#admin-shop-orders" class="sidebar-link ${activeTab === 'shop-orders' ? 'active' : ''}">
+              <span class="sidebar-link-icon">📦</span> Shop Orders
             </a>
             <a href="#admin-pricing" class="sidebar-link ${activeTab === 'pricing' ? 'active' : ''}">
-              <span class="sidebar-link-icon">🏷️</span> Price Manager
-            </a>
-            <a href="#admin-catalog" class="sidebar-link ${activeTab === 'catalog' ? 'active' : ''}">
-              <span class="sidebar-link-icon">📚</span> Service Catalog (CRUD)
+              <span class="sidebar-link-icon">🏷️</span> Print Price Manager
             </a>
             <a href="#admin-customers" class="sidebar-link ${activeTab === 'customers' ? 'active' : ''}">
               <span class="sidebar-link-icon">👥</span> Customer Directory
@@ -101,7 +130,7 @@ export const AdminViews = {
               <span class="sidebar-link-icon">📈</span> Reports & Analytics
             </a>
             <a href="#admin-settings" class="sidebar-link ${activeTab === 'settings' ? 'active' : ''}">
-              <span class="sidebar-link-icon">⚙️</span> Shop Settings
+              <span class="sidebar-link-icon">⚙️</span> Shop & Booking Settings
             </a>
           </div>
 
@@ -289,7 +318,7 @@ export const AdminViews = {
       </div>
     `;
 
-    await this.renderAdminLayout('dashboard', html);
+    await AdminViews.renderAdminLayout('dashboard', html);
 
     // Render Charts
     setTimeout(() => {
@@ -546,7 +575,7 @@ export const AdminViews = {
       </div>
     `;
 
-    await this.renderAdminLayout('orders', html);
+    await AdminViews.renderAdminLayout('orders', html);
 
     // Live Order Reception Polling Timer (Every 6 seconds — new orders only)
     if (window._adminOrderSyncTimer) {
@@ -570,7 +599,7 @@ export const AdminViews = {
         if (genuinelyNew.length > 0) {
           window._knownOrderIds = new Set(freshOrders.map(o => o.id));
           NotificationService.showToast(`🔔 NEW ORDER: ${genuinelyNew[0].id} (${genuinelyNew[0].customerName})!`, 'success');
-          this.renderOrders(queryStr);
+          AdminViews.renderOrders(queryStr);
         }
       } catch (e) {}
     }, 6000);
@@ -1331,7 +1360,7 @@ Thank you for choosing ${settings.shopName}!
         const diff = freshOrders.length - previousOrderCount;
         previousOrderCount = freshOrders.length;
         NotificationService.showToast(`🔔 ${diff} New Customer Order(s) Received! Live updating pipeline...`, 'success');
-        this.renderOrders(queryStr);
+        AdminViews.renderOrders(queryStr);
       } else {
         freshOrders.forEach(fo => {
           const target = orders.find(o => o.id === fo.id);
@@ -1538,7 +1567,7 @@ Thank you for choosing ${settings.shopName}!
       </div>
     `;
 
-    await this.renderAdminLayout('pricing', html);
+    await AdminViews.renderAdminLayout('pricing', html);
 
     // Live Search Filter for Delivery Zones
     const zoneSearchInput = document.getElementById('delivery-zone-search-input');
@@ -1630,7 +1659,7 @@ Thank you for choosing ${settings.shopName}!
       PricingEngine.savePricingData(pricing, DBService);
       if (window.ModalComponent) window.ModalComponent.close();
       NotificationService.showToast(`Paper Size "${name}" added successfully!`, 'success');
-      this.renderPricing();
+      AdminViews.renderPricing();
     };
 
     window.deletePaperSize = (sizeKey) => {
@@ -1638,7 +1667,7 @@ Thank you for choosing ${settings.shopName}!
         delete pricing.paperSizes[sizeKey];
         PricingEngine.savePricingData(pricing, DBService);
         NotificationService.showToast(`Paper Size "${sizeKey}" deleted.`, 'info');
-        this.renderPricing();
+        AdminViews.renderPricing();
       }
     };
 
@@ -1686,7 +1715,7 @@ Thank you for choosing ${settings.shopName}!
       PricingEngine.savePricingData(pricing, DBService);
       if (window.ModalComponent) window.ModalComponent.close();
       NotificationService.showToast(`Paper Quality "${name}" added!`, 'success');
-      this.renderPricing();
+      AdminViews.renderPricing();
     };
 
     window.deletePaperQuality = (qualityKey) => {
@@ -1694,7 +1723,7 @@ Thank you for choosing ${settings.shopName}!
         delete pricing.paperQualities[qualityKey];
         PricingEngine.savePricingData(pricing, DBService);
         NotificationService.showToast(`Paper Quality "${qualityKey}" deleted.`, 'info');
-        this.renderPricing();
+        AdminViews.renderPricing();
       }
     };
 
@@ -1748,7 +1777,7 @@ Thank you for choosing ${settings.shopName}!
       PricingEngine.savePricingData(pricing, DBService);
       if (window.ModalComponent) window.ModalComponent.close();
       NotificationService.showToast(`Binding Option "${name}" updated successfully!`, 'success');
-      this.renderPricing();
+      AdminViews.renderPricing();
     };
 
     window.deleteBinding = (bindingKey) => {
@@ -1756,7 +1785,7 @@ Thank you for choosing ${settings.shopName}!
         delete pricing.bindings[bindingKey];
         PricingEngine.savePricingData(pricing, DBService);
         NotificationService.showToast(`Binding Option "${bindingKey}" deleted.`, 'info');
-        this.renderPricing();
+        AdminViews.renderPricing();
       }
     };
 
@@ -1804,7 +1833,7 @@ Thank you for choosing ${settings.shopName}!
       PricingEngine.savePricingData(pricing, DBService);
       if (window.ModalComponent) window.ModalComponent.close();
       NotificationService.showToast(`Finishing Option "${name}" added!`, 'success');
-      this.renderPricing();
+      AdminViews.renderPricing();
     };
 
     window.deleteFinishingOption = (finishingKey) => {
@@ -1817,7 +1846,7 @@ Thank you for choosing ${settings.shopName}!
           delete pricing.lamination[finishingKey];
           PricingEngine.savePricingData(pricing, DBService);
           NotificationService.showToast(`Finishing Option "${finishingKey}" deleted.`, 'info');
-          this.renderPricing();
+          AdminViews.renderPricing();
         }
       }
     };
@@ -1873,7 +1902,7 @@ Thank you for choosing ${settings.shopName}!
 
       if (window.ModalComponent) window.ModalComponent.close();
       NotificationService.showToast(`Delivery Zone "${zoneName}" added!`, 'success');
-      this.renderPricing();
+      AdminViews.renderPricing();
     };
 
     window.deleteDeliveryZone = (zoneName) => {
@@ -1886,7 +1915,7 @@ Thank you for choosing ${settings.shopName}!
           delete pricing.deliveryZones[zoneName];
           PricingEngine.savePricingData(pricing, DBService);
           NotificationService.showToast(`Delivery Zone "${zoneName}" deleted!`, 'info');
-          this.renderPricing();
+          AdminViews.renderPricing();
         }
       }
     };
@@ -1932,7 +1961,7 @@ Thank you for choosing ${settings.shopName}!
       </div>
     `;
 
-    await this.renderAdminLayout('customers', html);
+    await AdminViews.renderAdminLayout('customers', html);
 
     document.getElementById('btn-export-cust-excel').onclick = () => {
       exportToCSV('Team7_Customers_Report.csv', customers);
@@ -2024,7 +2053,7 @@ Thank you for choosing ${settings.shopName}!
       </div>
     `;
 
-    await this.renderAdminLayout('reports', html);
+    await AdminViews.renderAdminLayout('reports', html);
 
     // Dynamic Filter Engine
     const periodSelect = document.getElementById('report-period-filter');
@@ -2319,7 +2348,7 @@ Thank you for choosing ${settings.shopName}!
       </div>
     `;
 
-    await this.renderAdminLayout('settings', html);
+    await AdminViews.renderAdminLayout('settings', html);
 
     document.getElementById('btn-save-settings-form').onclick = async () => {
       const btn = document.getElementById('btn-save-settings-form');
@@ -2498,7 +2527,7 @@ Thank you for choosing ${settings.shopName}!
       </div>
     `;
 
-    await this.renderAdminLayout('catalog', html);
+    await AdminViews.renderAdminLayout('catalog', html);
 
     // Define handlers AFTER the page exists. Both tabs now use their own
     // correct renderer and never execute a product handler on service data.
@@ -2589,34 +2618,40 @@ Thank you for choosing ${settings.shopName}!
     };
 
     window.saveProductForm = async (productId = '') => {
-      const name = document.getElementById('prod-name')?.value.trim();
-      const category = document.getElementById('prod-category')?.value || 'Accessory';
-      const price = Number(document.getElementById('prod-price')?.value);
-      const weightGrams = Number(document.getElementById('prod-weight')?.value);
-      const packagingWeightGrams = Number(document.getElementById('prod-pack-weight')?.value || 0);
-      const icon = document.getElementById('prod-icon')?.value.trim() || '📦';
-      const stockStatus = document.getElementById('prod-stock')?.value || 'In Stock';
-      const description = document.getElementById('prod-desc')?.value.trim();
-      const status = document.getElementById('prod-status')?.value || 'Active';
-      const popular = !!document.getElementById('prod-popular')?.checked;
+      const name = document.getElementById('prod-name')?.value?.trim();
+      const category = document.getElementById('prod-category')?.value || 'General';
+      const price = Number(document.getElementById('prod-price')?.value) || 0;
+      const stock = Number(document.getElementById('prod-stock')?.value) || 10;
+      const description = document.getElementById('prod-desc')?.value?.trim() || '';
 
-      if (!name || !description || !Number.isFinite(price) || price < 0 || !Number.isFinite(weightGrams) || weightGrams < 0 || !Number.isFinite(packagingWeightGrams) || packagingWeightGrams < 0) {
-        NotificationService.showToast('Please enter a valid product name, description and price.', 'warning');
+      if (!name) {
+        NotificationService.showToast('Please enter a valid product name.', 'warning');
         return;
       }
 
+      const payload = {
+        name,
+        category,
+        price,
+        stock,
+        description
+      };
+      if (productId && !String(productId).startsWith('temp-')) {
+        payload.id = productId;
+      }
+
+      console.log("CREATE PRODUCT PAYLOAD:", payload);
+
       try {
-        await DBService.saveProductItem({
-          ...(productId ? { id: productId } : {}),
-          name, category, price, weightGrams, packagingWeightGrams, icon, stockStatus, description, status, popular
-        });
+        await DBService.saveProductItem(payload);
 
         window.ModalComponent?.close();
         NotificationService.showToast(productId ? 'Product updated successfully!' : 'Product created successfully!', 'success');
-        await this.renderCatalog();
+        if (typeof AdminViews.renderCatalog === 'function') await AdminViews.renderCatalog();
+        if (typeof AdminViews.renderShopProductsManagement === 'function') await AdminViews.renderShopProductsManagement();
       } catch (err) {
         console.error('[CATALOG] Product save failed:', err);
-        NotificationService.showToast('Failed to save product. Check Firebase connection/permissions.', 'error');
+        NotificationService.showToast(`Failed to save product: ${err.message}`, 'error');
       }
     };
 
@@ -2627,7 +2662,7 @@ Thank you for choosing ${settings.shopName}!
       try {
         await DBService.deleteProductItem(productId);
         NotificationService.showToast('Product deleted.', 'info');
-        await this.renderCatalog();
+        await AdminViews.renderCatalog();
       } catch (err) {
         console.error('[CATALOG] Product delete failed:', err);
         NotificationService.showToast('Failed to delete product. Check Firebase permissions.', 'error');
@@ -2721,7 +2756,7 @@ Thank you for choosing ${settings.shopName}!
 
         window.ModalComponent?.close();
         NotificationService.showToast(serviceId ? 'Service updated successfully!' : 'Service created successfully!', 'success');
-        await this.renderCatalog();
+        await AdminViews.renderCatalog();
       } catch (err) {
         console.error('[CATALOG] Service save failed:', err);
         NotificationService.showToast('Failed to save service. Check Firebase connection/permissions.', 'error');
@@ -2735,11 +2770,1407 @@ Thank you for choosing ${settings.shopName}!
       try {
         await DBService.deleteCatalogItem(serviceId);
         NotificationService.showToast('Service deleted.', 'info');
-        await this.renderCatalog();
+        await AdminViews.renderCatalog();
       } catch (err) {
         console.error('[CATALOG] Service delete failed:', err);
         NotificationService.showToast('Failed to delete service.', 'error');
       }
     };
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  1. ADMIN SERVICES & CATEGORIES MANAGEMENT
+  // ══════════════════════════════════════════════════════════════════════
+  async renderServicesManagement(queryStr = '') {
+    const [services, categories] = await Promise.all([
+      DBService.getServicesCatalog(),
+      DBService.getServiceCategories()
+    ]);
+
+    const contentHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem;">
+        <div>
+          <h2>🛠️ IT & Hardware Services Catalog Management</h2>
+          <p class="text-muted">Create, edit, enable/disable services, starting prices, estimated time, and categories.</p>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button class="btn btn-outline btn-sm" id="admin-add-srv-cat-btn">+ Add Category</button>
+          <button class="btn btn-primary btn-sm glow-effect" id="admin-add-srv-btn">+ Add New Service</button>
+        </div>
+      </div>
+
+      <div class="table-card mb-4">
+        <div class="table-toolbar">
+          <h3>Services Catalog (${services.length} services)</h3>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Category</th>
+                <th>Starting Price</th>
+                <th>Est. Time</th>
+                <th>Location Types</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${services.map(s => `
+                <tr>
+                  <td>
+                    <div style="display:flex; align-items:center; gap:0.75rem;">
+                      <div style="font-size:1.6rem; width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:rgba(37,99,235,0.08); border-radius:6px;">${s.icon || '🛠️'}</div>
+                      <div>
+                        <b>${s.title || s.name}</b>
+                        <div style="font-size:0.75rem; color:var(--text-muted);">${s.id}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="badge" style="font-size:0.72rem; background:var(--bg-main); border:1px solid var(--border-color); color:var(--text-main);">${s.category || 'General'}</span></td>
+                  <td><b style="color:var(--primary);">${s.startingPrice || `₹${s.price}`}</b></td>
+                  <td>${s.estimatedTime || 'N/A'}</td>
+                  <td>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">
+                      ${(s.serviceTypes || ['Visit Shop']).join(', ')}
+                    </div>
+                  </td>
+                  <td><span class="badge ${s.status !== 'Inactive' ? 'badge-approved' : 'badge-rejected'}">${s.status || 'Active'}</span></td>
+                  <td>
+                    <div style="display:flex; gap:0.35rem;">
+                      <button class="btn btn-sm btn-outline edit-srv-item-btn" data-id="${s.id}">✏️ Edit</button>
+                      <button class="btn btn-sm btn-danger del-srv-item-btn" data-id="${s.id}">🗑️ Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    await AdminViews.renderAdminLayout('services', contentHTML);
+
+    // Event Bindings
+    document.getElementById('admin-add-srv-btn')?.addEventListener('click', () => {
+      AdminViews.openServiceEditModal(null, categories);
+    });
+
+    document.getElementById('admin-add-srv-cat-btn')?.addEventListener('click', () => {
+      AdminViews.openCategoryEditModal(null);
+    });
+
+    document.querySelectorAll('.edit-srv-item-btn').forEach(btn => {
+      btn.onclick = () => {
+        const target = services.find(s => s.id === btn.dataset.id);
+        if (target) AdminViews.openServiceEditModal(target, categories);
+      };
+    });
+
+    document.querySelectorAll('.del-srv-item-btn').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('Are you sure you want to delete this service?')) return;
+        await DBService.deleteCatalogItem(btn.dataset.id);
+        NotificationService.showToast('Service deleted.', 'info');
+        AdminViews.renderServicesManagement();
+      };
+    });
+  },
+
+  openCategoryEditModal(cat) {
+    const isEdit = !!cat;
+    const c = cat || { name: '', icon: '🛠️' };
+
+    const html = `
+      <form id="cat-edit-form" onsubmit="event.preventDefault(); window.saveCategorySubmit();" style="padding:0.5rem;">
+        <div class="form-group mb-3">
+          <label class="form-label">Category Name *</label>
+          <input type="text" class="form-control" id="ed-cat-name" value="${c.name}" required placeholder="E.g. Laptop Service">
+        </div>
+        <div class="form-group mb-3">
+          <label class="form-label">Category Icon / Emoji</label>
+          <input type="text" class="form-control" id="ed-cat-icon" value="${c.icon || '🛠️'}" placeholder="E.g. 💻">
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="ModalComponent.close()">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm glow-effect">Save Category ➔</button>
+        </div>
+      </form>
+    `;
+
+    ModalComponent.open(html, { title: isEdit ? `Edit Category: ${c.name}` : 'Add New Service Category' });
+
+    window.saveCategorySubmit = async () => {
+      const name = document.getElementById('ed-cat-name')?.value.trim();
+      const icon = document.getElementById('ed-cat-icon')?.value.trim() || '🛠️';
+      if (!name) return;
+
+      await DBService.saveServiceCategory({ ...(c.id ? { id: c.id } : {}), name, icon });
+      ModalComponent.close();
+      NotificationService.showToast('Category saved successfully!', 'success');
+      AdminViews.renderServicesManagement();
+    };
+  },
+
+  openServiceEditModal(srv, categories) {
+    const isEdit = !!srv;
+    const s = srv || {
+      title: '', category: categories[0]?.name || 'Laptop Service', price: 299,
+      startingPrice: 'Starting from ₹299', priceUnit: 'service', estimatedTime: '2 - 4 Hours',
+      warranty: '30 Days Warranty', status: 'Active', icon: '💻', shortDescription: '',
+      description: '', serviceTypes: ['Visit Shop', 'Home Service', 'Pickup & Delivery'],
+      deviceType: 'Laptop'
+    };
+
+    const selTypes = s.serviceTypes || ['Visit Shop', 'Home Service', 'Pickup & Delivery'];
+
+    const html = `
+      <form id="srv-edit-form" onsubmit="event.preventDefault(); window.saveServiceSubmit();" style="padding:0.5rem;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+          <div class="form-group">
+            <label class="form-label">Service Title / Name *</label>
+            <input type="text" class="form-control" id="ed-srv-title" value="${s.title || s.name || ''}" required placeholder="E.g. Laptop Screen Replacement">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Category *</label>
+            <select class="form-select" id="ed-srv-cat">
+              ${categories.map(c => `<option value="${c.name}" ${s.category === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem;" class="mt-2">
+          <div class="form-group">
+            <label class="form-label">Starting Price (₹) *</label>
+            <input type="number" class="form-control" id="ed-srv-price" value="${s.price || 299}" required min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Starting Price Label</label>
+            <input type="text" class="form-control" id="ed-srv-startlabel" value="${s.startingPrice || 'Starting from ₹299'}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Icon Emoji</label>
+            <input type="text" class="form-control" id="ed-srv-icon" value="${s.icon || '💻'}">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem;" class="mt-2">
+          <div class="form-group">
+            <label class="form-label">Estimated Duration</label>
+            <input type="text" class="form-control" id="ed-srv-time" value="${s.estimatedTime || '2 - 4 Hours'}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Warranty Info</label>
+            <input type="text" class="form-control" id="ed-srv-warranty" value="${s.warranty || '30 Days Warranty'}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Primary Device Type</label>
+            <select class="form-select" id="ed-srv-devicetype">
+              <option value="Laptop" ${s.deviceType === 'Laptop' ? 'selected' : ''}>Laptop</option>
+              <option value="Desktop" ${s.deviceType === 'Desktop' ? 'selected' : ''}>Desktop</option>
+              <option value="Printer" ${s.deviceType === 'Printer' ? 'selected' : ''}>Printer</option>
+              <option value="CCTV" ${s.deviceType === 'CCTV' ? 'selected' : ''}>CCTV</option>
+              <option value="Networking" ${s.deviceType === 'Networking' ? 'selected' : ''}>Networking</option>
+              <option value="Software" ${s.deviceType === 'Software' ? 'selected' : ''}>Software</option>
+              <option value="Other" ${s.deviceType === 'Other' ? 'selected' : ''}>Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group mt-2">
+          <label class="form-label" style="font-weight:700;">Service Type Options (Checkboxes)</label>
+          <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+            <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+              <input type="checkbox" id="ed-st-visit" ${selTypes.includes('Visit Shop') ? 'checked' : ''}> Visit Shop
+            </label>
+            <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+              <input type="checkbox" id="ed-st-home" ${selTypes.includes('Home Service') ? 'checked' : ''}> Home Service
+            </label>
+            <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+              <input type="checkbox" id="ed-st-pickup" ${selTypes.includes('Pickup & Delivery') ? 'checked' : ''}> Pickup & Delivery
+            </label>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:2fr 1fr; gap:1rem;" class="mt-2">
+          <div class="form-group">
+            <label class="form-label">Short Description *</label>
+            <input type="text" class="form-control" id="ed-srv-shortdesc" value="${s.shortDescription || s.description || ''}" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Status *</label>
+            <select class="form-select" id="ed-srv-status">
+              <option value="Active" ${s.status !== 'Inactive' ? 'selected' : ''}>Active</option>
+              <option value="Inactive" ${s.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group mt-2">
+          <label class="form-label" style="font-weight:700;">Booking Form Type (Step 3 Form Schema) *</label>
+          <select class="form-select" id="ed-srv-formtype">
+            <option value="hardware" ${s.bookingFormType === 'hardware' ? 'selected' : ''}>Hardware / Device Troubleshooting</option>
+            <option value="laptop" ${s.bookingFormType === 'laptop' ? 'selected' : ''}>Laptop Service</option>
+            <option value="desktop" ${s.bookingFormType === 'desktop' ? 'selected' : ''}>Desktop PC Service</option>
+            <option value="printer" ${s.bookingFormType === 'printer' ? 'selected' : ''}>Printer Service</option>
+            <option value="cctv" ${s.bookingFormType === 'cctv' ? 'selected' : ''}>CCTV Installation / Service</option>
+            <option value="networking" ${s.bookingFormType === 'networking' ? 'selected' : ''}>Networking Service</option>
+            <option value="printing" ${s.bookingFormType === 'printing' ? 'selected' : ''}>Certificates & Flyers Printing</option>
+            <option value="businessCard" ${s.bookingFormType === 'businessCard' ? 'selected' : ''}>Business Cards Printing</option>
+            <option value="photoPrinting" ${s.bookingFormType === 'photoPrinting' ? 'selected' : ''}>Photo Printing</option>
+            <option value="banner" ${s.bookingFormType === 'banner' ? 'selected' : ''}>Flex & Banner Printing</option>
+            <option value="brochure" ${s.bookingFormType === 'brochure' ? 'selected' : ''}>Brochure / Pamphlet Printing</option>
+            <option value="website" ${s.bookingFormType === 'website' ? 'selected' : ''}>Website Development</option>
+            <option value="billingSoftware" ${s.bookingFormType === 'billingSoftware' ? 'selected' : ''}>Billing Software</option>
+            <option value="software" ${s.bookingFormType === 'software' ? 'selected' : ''}>Software Installation</option>
+            <option value="windows" ${s.bookingFormType === 'windows' ? 'selected' : ''}>Windows Installation</option>
+            <option value="dataRecovery" ${s.bookingFormType === 'dataRecovery' ? 'selected' : ''}>Data Recovery</option>
+            <option value="security" ${s.bookingFormType === 'security' ? 'selected' : ''}>Virus & Security</option>
+            <option value="amc" ${s.bookingFormType === 'amc' ? 'selected' : ''}>Computer AMC Contract</option>
+            <option value="generic" ${s.bookingFormType === 'generic' ? 'selected' : ''}>Generic Service Requirements</option>
+          </select>
+        </div>
+
+        <div class="form-group mt-2">
+          <label class="form-label">Full Description</label>
+          <textarea class="form-control" id="ed-srv-desc" rows="3">${s.description || ''}</textarea>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="ModalComponent.close()">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm glow-effect">Save Service ➔</button>
+        </div>
+      </form>
+    `;
+
+    ModalComponent.open(html, { title: isEdit ? `Edit Service: ${s.title}` : 'Add New Service' });
+
+    window.saveServiceSubmit = async () => {
+      const title = document.getElementById('ed-srv-title')?.value.trim();
+      const category = document.getElementById('ed-srv-cat')?.value;
+      const price = Number(document.getElementById('ed-srv-price')?.value) || 0;
+      const shortDescription = document.getElementById('ed-srv-shortdesc')?.value.trim();
+
+      if (!title || !category || !shortDescription) {
+        NotificationService.showToast('Please fill in all required fields (Title, Category, Price, Short Description).', 'warning');
+        return;
+      }
+
+      const activeTypes = [];
+      if (document.getElementById('ed-st-visit')?.checked) activeTypes.push('Visit Shop');
+      if (document.getElementById('ed-st-home')?.checked) activeTypes.push('Home Service');
+      if (document.getElementById('ed-st-pickup')?.checked) activeTypes.push('Pickup & Delivery');
+
+      const payload = {
+        ...(s.id ? { id: s.id } : {}),
+        title,
+        name: title,
+        category,
+        price,
+        startingPrice: document.getElementById('ed-srv-startlabel')?.value.trim() || `Starting from ₹${price}`,
+        icon: document.getElementById('ed-srv-icon')?.value.trim() || '🛠️',
+        estimatedTime: document.getElementById('ed-srv-time')?.value.trim() || '2 - 4 Hours',
+        warranty: document.getElementById('ed-srv-warranty')?.value.trim() || '30 Days Warranty',
+        deviceType: document.getElementById('ed-srv-devicetype')?.value || 'Laptop',
+        bookingFormType: document.getElementById('ed-srv-formtype')?.value || 'generic',
+        serviceTypes: activeTypes.length > 0 ? activeTypes : ['Visit Shop'],
+        shortDescription,
+        description: document.getElementById('ed-srv-desc')?.value.trim() || shortDescription,
+        status: document.getElementById('ed-srv-status')?.value || 'Active'
+      };
+
+      await DBService.saveCatalogItem(payload);
+      ModalComponent.close();
+      NotificationService.showToast('Service saved successfully!', 'success');
+      AdminViews.renderServicesManagement();
+    };
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  2. ADMIN SERVICE BOOKINGS MANAGEMENT & TECHNICIAN ASSIGNMENT
+  // ══════════════════════════════════════════════════════════════════════
+  async renderBookingsManagement(queryStr = '') {
+    const [bookings, technicians] = await Promise.all([
+      DBService.getServiceBookings(true),
+      DBService.getTechnicians()
+    ]);
+
+    let filterStatus = 'all';
+
+    const renderBookingsTable = () => {
+      const filtered = filterStatus === 'all' ? bookings : bookings.filter(b => b.status === filterStatus);
+
+      const contentHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem;">
+          <div>
+            <h2>📅 Service Bookings Management</h2>
+            <p class="text-muted">Manage customer service appointments, assign technicians, update status, and reschedule dates.</p>
+          </div>
+          <div style="display:flex; gap:0.4rem; overflow-x:auto;">
+            <button class="btn btn-sm ${filterStatus === 'all' ? 'btn-primary' : 'btn-outline'} b-filter-btn" data-status="all">All (${bookings.length})</button>
+            <button class="btn btn-sm ${filterStatus === 'Pending' ? 'btn-primary' : 'btn-outline'} b-filter-btn" data-status="Pending">Pending</button>
+            <button class="btn btn-sm ${filterStatus === 'Confirmed' ? 'btn-primary' : 'btn-outline'} b-filter-btn" data-status="Confirmed">Confirmed</button>
+            <button class="btn btn-sm ${filterStatus === 'Technician Assigned' ? 'btn-primary' : 'btn-outline'} b-filter-btn" data-status="Technician Assigned">Assigned</button>
+            <button class="btn btn-sm ${filterStatus === 'Completed' ? 'btn-primary' : 'btn-outline'} b-filter-btn" data-status="Completed">Completed</button>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Booking ID</th>
+                  <th>Customer Info</th>
+                  <th>Service Details</th>
+                  <th>Schedule</th>
+                  <th>Assigned Tech</th>
+                  <th>Est. Amount</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filtered.length === 0 ? `
+                  <tr><td colspan="8" class="text-center p-4 text-muted">No service bookings found for filter "${filterStatus}"</td></tr>
+                ` : filtered.map(b => `
+                  <tr>
+                    <td><b>${b.id}</b></td>
+                    <td>
+                      <div style="font-weight:700;">${b.customerName}</div>
+                      <div style="font-size:0.75rem; color:var(--text-muted);">${b.customerPhone}</div>
+                      <div style="font-size:0.72rem; color:var(--text-muted); max-width:180px;" class="text-truncate">${b.customerAddress || ''}</div>
+                    </td>
+                    <td>
+                      <div style="font-weight:700;">${b.serviceName}</div>
+                      <div style="font-size:0.75rem; color:var(--primary); font-weight:600;">📍 ${b.serviceType}</div>
+                    </td>
+                    <td>
+                      <div style="font-weight:600;">📅 ${b.bookingDate}</div>
+                      <div style="font-size:0.75rem; color:var(--text-muted);">⏰ ${b.timeSlot}</div>
+                    </td>
+                    <td>
+                      ${b.assignedTechnician ? `
+                        <span class="badge badge-approved" style="font-size:0.75rem;">👨‍🔧 ${b.assignedTechnician.name}</span>
+                      ` : `
+                        <button class="btn btn-sm btn-outline assign-tech-btn" data-id="${b.id}">+ Assign Tech</button>
+                      `}
+                    </td>
+                    <td><b style="color:var(--primary);">${formatCurrency(b.estimatedPrice)}</b></td>
+                    <td>${getStatusBadgeHTML(b.status)}</td>
+                    <td>
+                      <div style="display:flex; gap:0.35rem;">
+                        <button class="btn btn-sm btn-outline view-b-detail-btn" data-id="${b.id}">👁️ Details</button>
+                        <button class="btn btn-sm btn-outline change-b-status-btn" data-id="${b.id}">Status</button>
+                        <button class="btn btn-sm btn-danger del-b-btn" data-id="${b.id}">✕</button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      AdminViews.renderAdminLayout('bookings', contentHTML);
+
+      // Filters
+      document.querySelectorAll('.b-filter-btn').forEach(b => {
+        b.onclick = () => { filterStatus = b.dataset.status; renderBookingsTable(); };
+      });
+
+      // View Booking Details
+      document.querySelectorAll('.view-b-detail-btn').forEach(btn => {
+        btn.onclick = () => {
+          const booking = bookings.find(b => b.id === btn.dataset.id);
+          if (booking) AdminViews.openBookingDetailsModal(booking);
+        };
+      });
+
+      // Assign Technician
+      document.querySelectorAll('.assign-tech-btn').forEach(btn => {
+        btn.onclick = () => {
+          const booking = bookings.find(b => b.id === btn.dataset.id);
+          if (booking) AdminViews.openAssignTechnicianModal(booking, technicians);
+        };
+      });
+
+      // Status Change
+      document.querySelectorAll('.change-b-status-btn').forEach(btn => {
+        btn.onclick = () => {
+          const booking = bookings.find(b => b.id === btn.dataset.id);
+          if (booking) AdminViews.openBookingStatusModal(booking, technicians);
+        };
+      });
+
+      // Delete Booking
+      document.querySelectorAll('.del-b-btn').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm('Delete this service booking record?')) return;
+          await DBService.deleteServiceBooking(btn.dataset.id);
+          NotificationService.showToast('Booking deleted.', 'info');
+          AdminViews.renderBookingsManagement();
+        };
+      });
+    };
+
+    renderBookingsTable();
+  },
+
+  // Modal to inspect full dynamic booking details
+  openBookingDetailsModal(b) {
+    const details = b.bookingDetails || {};
+    const detailEntries = Object.entries(details).filter(([k, v]) => v && k !== 'notes' && k !== 'problem');
+
+    const html = `
+      <div style="padding:0.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:0.75rem; margin-bottom:1rem;">
+          <div>
+            <h3 style="font-size:1.2rem; font-weight:700;">Booking #${b.id}</h3>
+            <div style="font-size:0.85rem; color:var(--text-muted);">${b.serviceName} | 📍 ${b.serviceType}</div>
+          </div>
+          <div>${getStatusBadgeHTML(b.status)}</div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;" class="mb-3">
+          <div class="glass-panel p-3" style="border-radius:10px;">
+            <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.5rem;">Customer Info</div>
+            <div style="font-weight:700;">${b.customerName}</div>
+            <div style="font-size:0.85rem; color:var(--text-muted);">📞 Phone: ${b.customerPhone}</div>
+            <div style="font-size:0.85rem; color:var(--text-muted);">💬 WhatsApp: ${b.customerWhatsapp || b.customerPhone}</div>
+            <div style="font-size:0.85rem; color:var(--text-muted);">🏠 ${b.customerAddress || ''}, ${b.city || ''} - ${b.pincode || ''}</div>
+          </div>
+
+          <div class="glass-panel p-3" style="border-radius:10px;">
+            <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.5rem;">Schedule & Technician</div>
+            <div style="font-size:0.88rem;">📅 Date: <b>${b.bookingDate}</b></div>
+            <div style="font-size:0.88rem;">⏰ Time Slot: <b>${b.timeSlot}</b></div>
+            <div style="font-size:0.88rem; margin-top:0.35rem;">👨‍🔧 Technician: <b>${b.assignedTechnician ? b.assignedTechnician.name : 'Unassigned'}</b></div>
+            <div style="font-size:0.95rem; font-weight:800; color:var(--primary); margin-top:0.35rem;">Est. Amount: ₹${b.estimatedPrice}</div>
+          </div>
+        </div>
+
+        <!-- Dynamic Service Specification & Requirements -->
+        <div class="glass-panel p-3 mb-3" style="border-radius:10px;">
+          <div style="font-size:0.85rem; font-weight:700; color:var(--text-main); margin-bottom:0.75rem;">📋 Service Specification Details (${b.bookingFormType || 'generic'})</div>
+          ${detailEntries.length === 0 ? `
+            <div style="font-size:0.85rem; color:var(--text-muted); font-style:italic;">No specific extra attributes recorded for this booking.</div>
+          ` : `
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:0.75rem;">
+              ${detailEntries.map(([k, v]) => `
+                <div style="background:var(--bg-main); padding:0.5rem 0.75rem; border-radius:6px; border:1px solid var(--border-color);">
+                  <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">${k.replace(/([A-Z])/g, ' $1').trim()}</div>
+                  <div style="font-size:0.88rem; font-weight:700; color:var(--text-main); word-break:break-word;">${v}</div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+
+          ${b.problemDescription ? `
+            <div style="margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--border-color);">
+              <div style="font-size:0.78rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Requirement / Issue Description</div>
+              <div style="font-size:0.9rem; color:var(--text-main); margin-top:0.25rem; white-space:pre-wrap;">${b.problemDescription}</div>
+            </div>
+          ` : ''}
+        </div>
+
+        ${(b.attachments && b.attachments.length > 0) ? `
+          <div class="glass-panel p-3 mb-3" style="border-radius:10px;">
+            <div style="font-size:0.85rem; font-weight:700; margin-bottom:0.5rem;">📎 Attached Files & Customer Design Artwork</div>
+            ${b.attachments.map(att => {
+              const fileId = att.fileId || att.id;
+              const fileUrl = fileId ? `/api/uploads/download.php?id=${fileId}` : (att.url || '#');
+              const downloadUrl = fileId ? `/api/uploads/download.php?id=${fileId}&download=1` : (att.url || '#');
+              const fileSize = att.size || att.fileSize || (att.rawSize ? (att.rawSize / 1024).toFixed(0) + ' KB' : 'File');
+              return `
+                <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-main); padding:0.6rem 0.75rem; border-radius:8px; margin-bottom:0.4rem; border:1px solid var(--border-color);">
+                  <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:260px;">
+                    <span style="font-weight:700;">📄 ${att.originalName || att.name || 'Attachment'}</span>
+                    <span style="font-size:0.75rem; color:var(--text-muted); display:block;">${fileSize}</span>
+                  </div>
+                  <div style="display:flex; gap:0.4rem;">
+                    <a href="${fileUrl}" target="_blank" class="btn btn-sm btn-outline" style="font-weight:700;">👁️ OPEN</a>
+                    <a href="${downloadUrl}" target="_blank" class="btn btn-sm btn-primary glow-effect" style="font-weight:700;">📥 DOWNLOAD</a>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        ` : ''}
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="ModalComponent.close()">Close</button>
+        </div>
+      </div>
+    `;
+
+    ModalComponent.open(html, { title: `Service Booking #${b.id}` });
+  },
+
+  openAssignTechnicianModal(booking, technicians) {
+    const html = `
+      <div style="padding:0.5rem;">
+        <h4 style="margin-bottom:0.5rem;">Assign Technician for #${booking.id}</h4>
+        <p class="text-muted" style="font-size:0.88rem; margin-bottom:1.25rem;">Service: <b>${booking.serviceName}</b> | Customer: <b>${booking.customerName}</b></p>
+
+        <div class="form-group mb-3">
+          <label class="form-label">Select Staff / Technician *</label>
+          <select class="form-select" id="assign-tech-select">
+            ${technicians.map(t => `<option value="${t.id}">${t.name} (${t.phone}) — Skills: ${t.skills.join(', ')}</option>`).join('')}
+          </select>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="ModalComponent.close()">Cancel</button>
+          <button type="button" class="btn btn-primary btn-sm glow-effect" id="confirm-assign-tech-btn">Confirm Assignment ➔</button>
+        </div>
+      </div>
+    `;
+
+    ModalComponent.open(html, { title: 'Assign Technician' });
+
+    document.getElementById('confirm-assign-tech-btn')?.addEventListener('click', async () => {
+      const techId = document.getElementById('assign-tech-select')?.value;
+      const tech = technicians.find(t => t.id === techId);
+      if (tech) {
+        await DBService.assignTechnicianToBooking(booking.id, tech);
+        ModalComponent.close();
+        NotificationService.showToast(`Technician ${tech.name} assigned to booking ${booking.id}!`, 'success');
+        AdminViews.renderBookingsManagement();
+      }
+    });
+  },
+
+  openBookingStatusModal(booking, technicians) {
+    const statuses = ['Pending', 'Confirmed', 'Technician Assigned', 'Service Started', 'Completed', 'Cancelled', 'Rejected'];
+
+    const html = `
+      <div style="padding:0.5rem;">
+        <h4 style="margin-bottom:0.5rem;">Update Status for #${booking.id}</h4>
+        
+        <div class="form-group mb-3">
+          <label class="form-label">Service Booking Status *</label>
+          <select class="form-select" id="update-b-status-select">
+            ${statuses.map(st => `<option value="${st}" ${booking.status === st ? 'selected' : ''}>${st}</option>`).join('')}
+          </select>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="ModalComponent.close()">Cancel</button>
+          <button type="button" class="btn btn-primary btn-sm glow-effect" id="save-b-status-btn">Save Status ➔</button>
+        </div>
+      </div>
+    `;
+
+    ModalComponent.open(html, { title: 'Update Booking Status' });
+
+    document.getElementById('save-b-status-btn')?.addEventListener('click', async () => {
+      const newSt = document.getElementById('update-b-status-select')?.value;
+      if (newSt) {
+        await DBService.updateBookingStatus(booking.id, newSt);
+        ModalComponent.close();
+        NotificationService.showToast(`Status updated to ${newSt}`, 'success');
+        AdminViews.renderBookingsManagement();
+      }
+    });
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  3. ADMIN STAFF / TECHNICIANS MANAGEMENT
+  // ══════════════════════════════════════════════════════════════════════
+  async renderTechniciansManagement(queryStr = '') {
+    const technicians = await DBService.getTechnicians();
+
+    const contentHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem;">
+        <div>
+          <h2>👨‍🔧 Staff / Technicians Directory</h2>
+          <p class="text-muted">Manage service technicians, contact details, and skill sets for assignment.</p>
+        </div>
+        <button class="btn btn-primary btn-sm glow-effect" id="admin-add-tech-btn">+ Add Technician</button>
+      </div>
+
+      <div class="table-card">
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Technician Name</th>
+                <th>Phone Number</th>
+                <th>Skills & Specialties</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${technicians.map(t => `
+                <tr>
+                  <td><b>👨‍🔧 ${t.name}</b></td>
+                  <td>${t.phone || 'N/A'}</td>
+                  <td>
+                    ${(t.skills || []).map(sk => `<span class="badge" style="font-size:0.72rem; background:rgba(37,99,235,0.08); color:var(--primary); font-weight:600; margin-right:0.25rem;">${sk}</span>`).join('')}
+                  </td>
+                  <td><span class="badge badge-approved">${t.status || 'Active'}</span></td>
+                  <td>
+                    <div style="display:flex; gap:0.35rem;">
+                      <button class="btn btn-sm btn-outline edit-tech-btn" data-id="${t.id}">✏️ Edit</button>
+                      <button class="btn btn-sm btn-danger del-tech-btn" data-id="${t.id}">✕</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    await AdminViews.renderAdminLayout('technicians', contentHTML);
+
+    document.getElementById('admin-add-tech-btn')?.addEventListener('click', () => {
+      AdminViews.openTechnicianModal(null);
+    });
+
+    document.querySelectorAll('.edit-tech-btn').forEach(btn => {
+      btn.onclick = () => {
+        const tech = technicians.find(t => t.id === btn.dataset.id);
+        if (tech) AdminViews.openTechnicianModal(tech);
+      };
+    });
+
+    document.querySelectorAll('.del-tech-btn').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('Delete technician profile?')) return;
+        await DBService.deleteTechnician(btn.dataset.id);
+        NotificationService.showToast('Technician removed.', 'info');
+        AdminViews.renderTechniciansManagement();
+      };
+    });
+  },
+
+  openTechnicianModal(tech) {
+    const isEdit = !!tech;
+    const t = tech || { name: '', phone: '', skills: ['Hardware Repair', 'Software Setup'], status: 'Active' };
+
+    const html = `
+      <form id="tech-edit-form" onsubmit="event.preventDefault(); window.saveTechSubmit();" style="padding:0.5rem;">
+        <div class="form-group mb-3">
+          <label class="form-label">Technician Name *</label>
+          <input type="text" class="form-control" id="ed-tech-name" value="${t.name}" required>
+        </div>
+        <div class="form-group mb-3">
+          <label class="form-label">Phone Number *</label>
+          <input type="tel" class="form-control" id="ed-tech-phone" value="${t.phone}" required>
+        </div>
+        <div class="form-group mb-3">
+          <label class="form-label">Skills (Comma separated) *</label>
+          <input type="text" class="form-control" id="ed-tech-skills" value="${(t.skills || []).join(', ')}" required>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="ModalComponent.close()">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm glow-effect">Save Technician ➔</button>
+        </div>
+      </form>
+    `;
+
+    ModalComponent.open(html, { title: isEdit ? `Edit Technician: ${t.name}` : 'Add New Technician' });
+
+    window.saveTechSubmit = async () => {
+      const name = document.getElementById('ed-tech-name')?.value.trim();
+      const phone = document.getElementById('ed-tech-phone')?.value.trim();
+      const rawSkills = document.getElementById('ed-tech-skills')?.value.trim();
+      const skills = rawSkills.split(',').map(s => s.trim()).filter(Boolean);
+
+      if (!name || !phone) return;
+
+      await DBService.saveTechnician({
+        ...(t.id ? { id: t.id } : {}),
+        name, phone, skills, status: 'Active'
+      });
+
+      ModalComponent.close();
+      NotificationService.showToast('Technician saved successfully!', 'success');
+      AdminViews.renderTechniciansManagement();
+    };
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  4. ADMIN SHOP PRODUCTS & INVENTORY MANAGEMENT
+  // ══════════════════════════════════════════════════════════════════════
+  async renderShopProductsManagement(queryStr = '') {
+    const [products, categories] = await Promise.all([
+      DBService.getProductsCatalog(),
+      DBService.getShopCategories()
+    ]);
+
+    const contentHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem;">
+        <div>
+          <h2>🛍️ Shop Products & Stock Inventory Management</h2>
+          <p class="text-muted">Manage product prices, MRP discounts, stock quantities, SKU codes, and low stock limits.</p>
+        </div>
+        <button class="btn btn-primary btn-sm glow-effect" id="admin-add-prod-btn">+ Add New Product</button>
+      </div>
+
+      <div class="table-card">
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>SKU</th>
+                <th>Category</th>
+                <th>Price / MRP</th>
+                <th>Stock Level</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${products.map(p => {
+                const isLow = p.stock <= (p.lowStockLimit || 3);
+                const isOut = p.stock <= 0;
+                return `
+                  <tr>
+                    <td>
+                      <div style="display:flex; align-items:center; gap:0.75rem;">
+                        <div style="font-size:1.6rem; width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:rgba(37,99,235,0.08); border-radius:6px;">${p.icon || '📦'}</div>
+                        <div>
+                          <b>${p.name}</b>
+                          <div style="font-size:0.75rem; color:var(--text-muted);">${p.brand || 'No Brand'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td><code style="font-family:monospace; font-size:0.82rem;">${p.sku || p.id}</code></td>
+                    <td><span class="badge" style="font-size:0.72rem; background:var(--bg-main); border:1px solid var(--border-color); color:var(--text-main);">${p.category}</span></td>
+                    <td>
+                      <b style="color:var(--primary);">₹${Number(p.price).toFixed(2)}</b>
+                      ${p.mrp > p.price ? `<div style="font-size:0.72rem; text-decoration:line-through; color:var(--text-muted);">₹${Number(p.mrp).toFixed(2)}</div>` : ''}
+                    </td>
+                    <td>
+                      <span class="badge ${isOut ? 'badge-rejected' : isLow ? 'badge-waiting' : 'badge-approved'}">
+                        ${isOut ? 'Out of Stock (0)' : isLow ? `Low Stock (${p.stock})` : `In Stock (${p.stock})`}
+                      </span>
+                    </td>
+                    <td><span class="badge ${p.status !== 'Inactive' ? 'badge-approved' : 'badge-rejected'}">${p.status || 'Active'}</span></td>
+                    <td>
+                      <div style="display:flex; gap:0.35rem;">
+                        <button class="btn btn-sm btn-outline edit-prod-btn" data-id="${p.id}">✏️ Edit</button>
+                        <button class="btn btn-sm btn-danger del-prod-btn" data-id="${p.id}">✕</button>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    await AdminViews.renderAdminLayout('shop', contentHTML);
+
+    document.getElementById('admin-add-prod-btn')?.addEventListener('click', () => {
+      AdminViews.openProductEditModal(null, categories);
+    });
+
+    document.querySelectorAll('.edit-prod-btn').forEach(btn => {
+      btn.onclick = () => {
+        const prod = products.find(p => p.id === btn.dataset.id);
+        if (prod) AdminViews.openProductEditModal(prod, categories);
+      };
+    });
+
+    document.querySelectorAll('.del-prod-btn').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this product from shop catalog?')) return;
+        await DBService.deleteProductItem(btn.dataset.id);
+        NotificationService.showToast('Product deleted.', 'info');
+        AdminViews.renderShopProductsManagement();
+      };
+    });
+  },
+
+  openProductEditModal(prod, categories) {
+    const isEdit = !!prod;
+    const productId = prod?.id || 'prod-' + Date.now();
+    const p = prod || {
+      id: productId, name: '', sku: '', category: categories[0]?.name || 'Computer Accessories',
+      brand: '', price: 299, mrp: 399, discount: 100, stock: 10, lowStockLimit: 3,
+      icon: '📦', description: '', specifications: '', warranty: '1 Year Warranty',
+      popular: false, bestSeller: false, status: 'Active'
+    };
+
+    // Product Images State
+    let mainImage = p.mainImage || p.image || p.imageUrl || '';
+    let mainImageStoragePath = p.mainImageStoragePath || '';
+    let images = Array.isArray(p.images) ? [...p.images] : [];
+    let imageMetadata = Array.isArray(p.imageMetadata) ? [...p.imageMetadata] : [];
+
+    let isUploading = false;
+
+    const renderImageSectionHTML = () => `
+      <div style="background:var(--bg-main); border:1px solid var(--border-color); padding:1rem; border-radius:12px; margin:1rem 0;">
+        <h4 style="font-size:0.95rem; font-weight:700; margin-bottom:0.75rem; color:var(--text-main); display:flex; align-items:center; gap:0.5rem;">
+          <span>🖼️ Product Images (Firebase Storage)</span>
+          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">(Max 10MB per image. Formats: JPG, PNG, WebP)</span>
+        </h4>
+
+        <!-- Main Product Image Dropzone / Preview -->
+        <div style="display:grid; grid-template-columns:180px 1fr; gap:1.25rem; align-items:center; margin-bottom:1.25rem;">
+          <div id="main-img-dropzone" style="height:160px; border:2px dashed var(--border-color); border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0.5rem; text-align:center; background:var(--bg-card); cursor:pointer; position:relative; overflow:hidden;">
+            ${mainImage ? `
+              <img src="${mainImage}" alt="Main Image" style="max-height:100%; max-width:100%; object-fit:contain;">
+            ` : `
+              <div style="font-size:2.2rem; margin-bottom:0.25rem;">📷</div>
+              <div style="font-size:0.8rem; font-weight:700; color:var(--primary);">Drop Main Image</div>
+              <div style="font-size:0.7rem; color:var(--text-muted);">or click to browse</div>
+            `}
+          </div>
+
+          <div>
+            <div style="font-size:0.88rem; font-weight:700; color:var(--text-main);">Main Display Image</div>
+            <p class="text-muted" style="font-size:0.78rem; margin:0.25rem 0 0.75rem;">This primary image is shown on shop product cards, checkout, cart, and search results. Recommended: 1200×1200 px.</p>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+              <button type="button" class="btn btn-sm btn-outline" id="trigger-main-img-upload">📷 ${mainImage ? 'Replace Main Image' : 'Upload Main Image'}</button>
+              ${mainImage ? `<button type="button" class="btn btn-sm btn-danger" id="remove-main-img-btn">🗑️ Remove Main Image</button>` : ''}
+              <input type="file" id="main-img-file-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display:none;">
+            </div>
+            <div id="main-img-status" style="font-size:0.8rem; color:var(--primary); font-weight:600; margin-top:0.4rem;"></div>
+          </div>
+        </div>
+
+        <!-- Additional Product Gallery Images (Up to 5) -->
+        <div style="border-top:1px solid var(--border-color); padding-top:1rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+            <div style="font-size:0.85rem; font-weight:700;">Additional Gallery Images (${images.length}/5)</div>
+            ${images.length < 5 ? `
+              <button type="button" class="btn btn-sm btn-outline" id="trigger-gallery-img-upload">+ Add Gallery Image</button>
+              <input type="file" id="gallery-img-file-input" accept="image/jpeg,image/jpg,image/png,image/webp" style="display:none;">
+            ` : `<span style="font-size:0.75rem; color:var(--text-muted);">Gallery full (max 5)</span>`}
+          </div>
+          
+          <div id="gallery-status" style="font-size:0.8rem; color:var(--primary); font-weight:600; margin-bottom:0.5rem;"></div>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:0.75rem;" id="gallery-grid">
+            ${images.length === 0 ? `
+              <div style="grid-column:1/-1; font-size:0.78rem; color:var(--text-muted); font-style:italic;">No additional gallery images uploaded yet. You can upload up to 5 secondary view images.</div>
+            ` : images.map((imgUrl, idx) => `
+              <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; padding:0.5rem; display:flex; flex-direction:column; align-items:center; gap:0.4rem; position:relative;">
+                <div style="height:80px; width:100%; display:flex; align-items:center; justify-content:center;">
+                  <img src="${imgUrl}" style="max-height:100%; max-width:100%; object-fit:contain; border-radius:6px;">
+                </div>
+                <div style="display:flex; gap:0.25rem; width:100%; justify-content:center;">
+                  <button type="button" class="btn btn-sm btn-outline set-main-gallery-btn" data-idx="${idx}" title="Set as Main Display Image" style="font-size:0.65rem; padding:0.2rem 0.4rem;">★ Main</button>
+                  ${idx > 0 ? `<button type="button" class="btn btn-sm btn-outline move-up-gallery-btn" data-idx="${idx}" title="Move Up" style="padding:0.2rem 0.35rem;">←</button>` : ''}
+                  ${idx < images.length - 1 ? `<button type="button" class="btn btn-sm btn-outline move-down-gallery-btn" data-idx="${idx}" title="Move Down" style="padding:0.2rem 0.35rem;">→</button>` : ''}
+                  <button type="button" class="btn btn-sm btn-danger del-gallery-img-btn" data-idx="${idx}" title="Delete Image" style="padding:0.2rem 0.35rem;">✕</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+
+    const html = `
+      <form id="prod-edit-form" onsubmit="event.preventDefault(); window.saveProductSubmit();" style="padding:0.5rem;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+          <div class="form-group">
+            <label class="form-label">Product Name *</label>
+            <input type="text" class="form-control" id="ed-p-name" value="${p.name}" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">SKU Code *</label>
+            <input type="text" class="form-control" id="ed-p-sku" value="${p.sku || ''}" placeholder="E.g. T7-KB-001" required>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;" class="mt-2">
+          <div class="form-group">
+            <label class="form-label">Category *</label>
+            <select class="form-select" id="ed-p-cat">
+              ${categories.map(c => `<option value="${c.name}" ${p.category === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Brand / Manufacturer</label>
+            <input type="text" class="form-control" id="ed-p-brand" value="${p.brand || ''}">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:0.75rem;" class="mt-2">
+          <div class="form-group">
+            <label class="form-label">Selling Price (₹) *</label>
+            <input type="number" class="form-control" id="ed-p-price" value="${p.price}" required min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">MRP (₹)</label>
+            <input type="number" class="form-control" id="ed-p-mrp" value="${p.mrp || p.price}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Stock Quantity *</label>
+            <input type="number" class="form-control" id="ed-p-stock" value="${p.stock}" required min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Low Stock Limit</label>
+            <input type="number" class="form-control" id="ed-p-lowlimit" value="${p.lowStockLimit || 3}">
+          </div>
+        </div>
+
+        <div id="product-images-container">
+          ${renderImageSectionHTML()}
+        </div>
+
+        <div class="form-group mt-2">
+          <label class="form-label">Icon Emoji (Fallback)</label>
+          <input type="text" class="form-control" id="ed-p-icon" value="${p.icon || '📦'}">
+        </div>
+
+        <div class="form-group mt-2">
+          <label class="form-label">Description</label>
+          <textarea class="form-control" id="ed-p-desc" rows="2">${p.description || ''}</textarea>
+        </div>
+
+        <div class="form-group mt-2">
+          <label class="form-label">Specifications</label>
+          <input type="text" class="form-control" id="ed-p-specs" value="${p.specifications || ''}">
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="ModalComponent.close()">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm glow-effect" id="save-prod-btn">Save Product ➔</button>
+        </div>
+      </form>
+    `;
+
+    ModalComponent.open(html, { title: isEdit ? `Edit Product: ${p.name}` : 'Add New Shop Product' });
+
+    // Function to re-render the image management section inside modal
+    const refreshImageSection = () => {
+      const container = document.getElementById('product-images-container');
+      if (container) {
+        container.innerHTML = renderImageSectionHTML();
+        bindImageSectionEvents();
+      }
+    };
+
+    const bindImageSectionEvents = () => {
+      // Main image triggers & file input
+      const mainFileInput = document.getElementById('main-img-file-input');
+      const triggerMainBtn = document.getElementById('trigger-main-img-upload');
+      const mainDropzone = document.getElementById('main-img-dropzone');
+      const removeMainBtn = document.getElementById('remove-main-img-btn');
+
+      if (triggerMainBtn && mainFileInput) {
+        triggerMainBtn.onclick = () => mainFileInput.click();
+      }
+      if (mainDropzone && mainFileInput) {
+        mainDropzone.onclick = () => mainFileInput.click();
+        mainDropzone.ondragover = (e) => { e.preventDefault(); mainDropzone.style.borderColor = 'var(--primary)'; };
+        mainDropzone.ondragleave = () => { mainDropzone.style.borderColor = 'var(--border-color)'; };
+        mainDropzone.ondrop = (e) => {
+          e.preventDefault();
+          mainDropzone.style.borderColor = 'var(--border-color)';
+          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            handleMainImageUpload(e.dataTransfer.files[0]);
+          }
+        };
+      }
+      if (mainFileInput) {
+        mainFileInput.onchange = (e) => {
+          if (e.target.files && e.target.files[0]) {
+            handleMainImageUpload(e.target.files[0]);
+          }
+        };
+      }
+      if (removeMainBtn) {
+        removeMainBtn.onclick = async () => {
+          if (!confirm('Remove main product image?')) return;
+          if (mainImageStoragePath) {
+            try {
+              const { StorageService } = await import('../services/storage-service.js');
+              await StorageService.deleteFileByPath(mainImageStoragePath);
+            } catch (e) {}
+          }
+          mainImage = '';
+          mainImageStoragePath = '';
+          imageMetadata = imageMetadata.filter(m => m.type !== 'main');
+          refreshImageSection();
+        };
+      }
+
+      // Gallery image triggers & file input
+      const galleryFileInput = document.getElementById('gallery-img-file-input');
+      const triggerGalleryBtn = document.getElementById('trigger-gallery-img-upload');
+
+      if (triggerGalleryBtn && galleryFileInput) {
+        triggerGalleryBtn.onclick = () => galleryFileInput.click();
+      }
+      if (galleryFileInput) {
+        galleryFileInput.onchange = (e) => {
+          if (e.target.files && e.target.files[0]) {
+            handleGalleryImageUpload(e.target.files[0]);
+          }
+        };
+      }
+
+      // Gallery Thumbnail Action Handlers
+      document.querySelectorAll('.set-main-gallery-btn').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.idx);
+          if (images[idx]) {
+            const oldMain = mainImage;
+            const oldMainPath = mainImageStoragePath;
+
+            mainImage = images[idx];
+            const meta = imageMetadata.find(m => m.url === mainImage);
+            mainImageStoragePath = meta ? meta.storagePath : '';
+
+            // Replace gallery image with old main
+            if (oldMain) {
+              images[idx] = oldMain;
+              const gMetaIdx = imageMetadata.findIndex(m => m.url === images[idx]);
+              if (gMetaIdx !== -1) imageMetadata[gMetaIdx].storagePath = oldMainPath;
+            } else {
+              images.splice(idx, 1);
+            }
+
+            refreshImageSection();
+          }
+        };
+      });
+
+      document.querySelectorAll('.move-up-gallery-btn').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.idx);
+          if (idx > 0) {
+            const temp = images[idx];
+            images[idx] = images[idx - 1];
+            images[idx - 1] = temp;
+            refreshImageSection();
+          }
+        };
+      });
+
+      document.querySelectorAll('.move-down-gallery-btn').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.idx);
+          if (idx < images.length - 1) {
+            const temp = images[idx];
+            images[idx] = images[idx + 1];
+            images[idx + 1] = temp;
+            refreshImageSection();
+          }
+        };
+      });
+
+      document.querySelectorAll('.del-gallery-img-btn').forEach(btn => {
+        btn.onclick = async () => {
+          const idx = Number(btn.dataset.idx);
+          if (!confirm('Delete this product image?')) return;
+          const targetUrl = images[idx];
+          const meta = imageMetadata.find(m => m.url === targetUrl);
+
+          if (meta && meta.storagePath) {
+            try {
+              const { StorageService } = await import('../services/storage-service.js');
+              await StorageService.deleteFileByPath(meta.storagePath);
+            } catch (e) {
+              NotificationService.showToast('Unable to delete image from storage.', 'warning');
+            }
+          }
+
+          images.splice(idx, 1);
+          imageMetadata = imageMetadata.filter(m => m.url !== targetUrl);
+          refreshImageSection();
+        };
+      });
+    };
+
+    const handleMainImageUpload = async (file) => {
+      const statusEl = document.getElementById('main-img-status');
+      const saveBtn = document.getElementById('save-prod-btn');
+      if (statusEl) statusEl.textContent = 'Optimizing image...';
+      if (saveBtn) saveBtn.disabled = true;
+      isUploading = true;
+
+      try {
+        const { StorageService } = await import('../services/storage-service.js');
+        const uploadRes = await StorageService.uploadProductImage(file, productId, (progress) => {
+          if (statusEl) statusEl.textContent = `Uploading main image... ${progress}%`;
+        });
+
+        // Delete old main image if replacing
+        if (mainImageStoragePath) {
+          StorageService.deleteFileByPath(mainImageStoragePath).catch(() => {});
+        }
+
+        mainImage = uploadRes.downloadURL;
+        mainImageStoragePath = uploadRes.storagePath;
+
+        imageMetadata = imageMetadata.filter(m => m.type !== 'main');
+        imageMetadata.push({ url: mainImage, storagePath: mainImageStoragePath, type: 'main' });
+
+        if (statusEl) statusEl.textContent = 'Uploaded successfully!';
+        NotificationService.showToast('Main product image uploaded to Firebase Storage.', 'success');
+        refreshImageSection();
+      } catch (err) {
+        if (statusEl) statusEl.textContent = '';
+        NotificationService.showToast(err.message || 'Main image upload failed.', 'error');
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
+        isUploading = false;
+      }
+    };
+
+    const handleGalleryImageUpload = async (file) => {
+      if (images.length >= 5) {
+        NotificationService.showToast('Maximum 5 additional gallery images allowed.', 'warning');
+        return;
+      }
+
+      const statusEl = document.getElementById('gallery-status');
+      const saveBtn = document.getElementById('save-prod-btn');
+      if (statusEl) statusEl.textContent = 'Optimizing image...';
+      if (saveBtn) saveBtn.disabled = true;
+      isUploading = true;
+
+      try {
+        const { StorageService } = await import('../services/storage-service.js');
+        const uploadRes = await StorageService.uploadProductImage(file, productId, (progress) => {
+          if (statusEl) statusEl.textContent = `Uploading gallery image... ${progress}%`;
+        });
+
+        images.push(uploadRes.downloadURL);
+        imageMetadata.push({ url: uploadRes.downloadURL, storagePath: uploadRes.storagePath, type: 'gallery' });
+
+        if (statusEl) statusEl.textContent = 'Uploaded successfully!';
+        NotificationService.showToast('Gallery image uploaded to Firebase Storage.', 'success');
+        refreshImageSection();
+      } catch (err) {
+        if (statusEl) statusEl.textContent = '';
+        NotificationService.showToast(err.message || 'Gallery image upload failed.', 'error');
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
+        isUploading = false;
+      }
+    };
+
+    bindImageSectionEvents();
+
+    window.saveProductSubmit = async () => {
+      if (isUploading) {
+        NotificationService.showToast('Please wait for image upload to complete before saving.', 'warning');
+        return;
+      }
+
+      const name = document.getElementById('ed-p-name')?.value?.trim();
+      const sku = document.getElementById('ed-p-sku')?.value?.trim() || ('SKU-' + Date.now());
+      const price = Number(document.getElementById('ed-p-price')?.value) || 0;
+      const mrp = Number(document.getElementById('ed-p-mrp')?.value) || price;
+      const stock = Number(document.getElementById('ed-p-stock')?.value) || 0;
+
+      if (!name) {
+        NotificationService.showToast('Product Name is required.', 'warning');
+        return;
+      }
+
+      const saveBtn = document.getElementById('save-prod-btn');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving Product...'; }
+
+      try {
+        const payload = {
+          name,
+          sku,
+          category: document.getElementById('ed-p-cat')?.value || 'General',
+          brand: document.getElementById('ed-p-brand')?.value?.trim() || '',
+          price,
+          mrp,
+          discount: Math.max(0, mrp - price),
+          stock,
+          lowStockLimit: Number(document.getElementById('ed-p-lowlimit')?.value) || 3,
+          stockStatus: stock <= 0 ? 'Out of Stock' : (stock <= 3 ? 'Low Stock' : 'In Stock'),
+          mainImage,
+          mainImageStoragePath,
+          images,
+          imageMetadata,
+          image: mainImage || (images[0] || ''),
+          icon: document.getElementById('ed-p-icon')?.value?.trim() || '📦',
+          description: document.getElementById('ed-p-desc')?.value?.trim() || '',
+          specifications: document.getElementById('ed-p-specs')?.value?.trim() || '',
+          status: 'Active'
+        };
+
+        if (productId && !String(productId).startsWith('temp-')) {
+          payload.id = productId;
+        }
+
+        console.log("CREATE PRODUCT PAYLOAD:", payload);
+
+        await DBService.saveProductItem(payload);
+        ModalComponent.close();
+        NotificationService.showToast('Product saved successfully!', 'success');
+        if (typeof AdminViews.renderShopProductsManagement === 'function') AdminViews.renderShopProductsManagement();
+      } catch (err) {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Product ➔'; }
+        NotificationService.showToast(err.message || 'Failed to save product.', 'error');
+      }
+    };
+  },
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  5. ADMIN E-COMMERCE SHOP ORDERS MANAGEMENT
+  // ══════════════════════════════════════════════════════════════════════
+  async renderShopOrdersManagement(queryStr = '') {
+    const [allOrders, settings] = await Promise.all([
+      DBService.getOrders(true),
+      DBService.getSettings()
+    ]);
+
+    const shopOrders = allOrders.filter(o => o.orderType === 'shop');
+    let filterStatus = 'all';
+
+    const renderShopOrdersTable = () => {
+      const filtered = filterStatus === 'all' ? shopOrders : shopOrders.filter(o => (o.orderStatus || o.status) === filterStatus);
+
+      const contentHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem;">
+          <div>
+            <h2>📦 Shop Orders Management</h2>
+            <p class="text-muted">Process e-commerce customer orders, update delivery status, verify payments, and print invoices.</p>
+          </div>
+          <div style="display:flex; gap:0.4rem; overflow-x:auto;">
+            <button class="btn btn-sm ${filterStatus === 'all' ? 'btn-primary' : 'btn-outline'} so-filter-btn" data-status="all">All (${shopOrders.length})</button>
+            <button class="btn btn-sm ${filterStatus === 'Pending' ? 'btn-primary' : 'btn-outline'} so-filter-btn" data-status="Pending">Pending</button>
+            <button class="btn btn-sm ${filterStatus === 'Processing' ? 'btn-primary' : 'btn-outline'} so-filter-btn" data-status="Processing">Processing</button>
+            <button class="btn btn-sm ${filterStatus === 'Shipped' ? 'btn-primary' : 'btn-outline'} so-filter-btn" data-status="Shipped">Shipped</button>
+            <button class="btn btn-sm ${filterStatus === 'Delivered' ? 'btn-primary' : 'btn-outline'} so-filter-btn" data-status="Delivered">Delivered</button>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Customer Info</th>
+                  <th>Purchased Items</th>
+                  <th>Grand Total</th>
+                  <th>Payment Status</th>
+                  <th>Order Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filtered.length === 0 ? `
+                  <tr><td colspan="7" class="text-center p-4 text-muted">No shop orders found for filter "${filterStatus}"</td></tr>
+                ` : filtered.map(o => `
+                  <tr>
+                    <td><b>${o.id}</b><div style="font-size:0.75rem; color:var(--text-muted);">${formatDate(o.createdAt)}</div></td>
+                    <td>
+                      <div style="font-weight:700;">${o.customerName}</div>
+                      <div style="font-size:0.75rem; color:var(--text-muted);">${o.customerPhone}</div>
+                      <div style="font-size:0.72rem; color:var(--text-muted);">${o.deliveryMethod}</div>
+                    </td>
+                    <td>
+                      <div style="font-weight:600; font-size:0.875rem;">${(o.items || []).map(i => `${i.name} (x${i.quantity})`).join(', ')}</div>
+                    </td>
+                    <td><b style="color:var(--primary);">${formatCurrency(o.pricing?.total)}</b></td>
+                    <td>
+                      <span class="badge ${(o.payment?.status === 'Verified' || o.payment?.status === 'Paid') ? 'badge-approved' : 'badge-waiting'}">
+                        ${o.payment?.method || 'COD'} (${o.payment?.status || 'Pending'})
+                      </span>
+                    </td>
+                    <td>${getStatusBadgeHTML(o.orderStatus || o.status)}</td>
+                    <td>
+                      <div style="display:flex; gap:0.35rem;">
+                        <button class="btn btn-sm btn-outline update-so-status-btn" data-id="${o.id}">Status</button>
+                        <button class="btn btn-sm btn-secondary print-so-inv-btn" data-id="${o.id}">🧾 Invoice</button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      AdminViews.renderAdminLayout('shop-orders', contentHTML);
+
+      document.querySelectorAll('.so-filter-btn').forEach(b => {
+        b.onclick = () => { filterStatus = b.dataset.status; renderShopOrdersTable(); };
+      });
+
+      document.querySelectorAll('.update-so-status-btn').forEach(btn => {
+        btn.onclick = () => {
+          const order = shopOrders.find(o => o.id === btn.dataset.id);
+          if (order) AdminViews.openShopOrderStatusModal(order);
+        };
+      });
+
+      document.querySelectorAll('.print-so-inv-btn').forEach(btn => {
+        btn.onclick = () => {
+          const order = shopOrders.find(o => o.id === btn.dataset.id);
+          if (order) {
+            const html = InvoiceComponent.renderHTML(order, settings);
+            ModalComponent.open(html, { title: `Invoice: ${order.id}` });
+          }
+        };
+      });
+    };
+
+    renderShopOrdersTable();
+  },
+
+  openShopOrderStatusModal(order) {
+    const statuses = ['Pending', 'Processing', 'Packed', 'Shipped', 'Delivered', 'Cancelled', 'Refunded'];
+    const pStatuses = ['Pending', 'Paid', 'Verified', 'Failed', 'Refunded'];
+
+    const html = `
+      <div style="padding:0.5rem;">
+        <h4 style="margin-bottom:0.5rem;">Update Shop Order #${order.id}</h4>
+
+        <div class="form-group mb-3">
+          <label class="form-label">Order Fulfillment Status *</label>
+          <select class="form-select" id="update-so-status-select">
+            ${statuses.map(st => `<option value="${st}" ${(order.orderStatus || order.status) === st ? 'selected' : ''}>${st}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="form-group mb-3">
+          <label class="form-label">Payment Status *</label>
+          <select class="form-select" id="update-so-pstatus-select">
+            ${pStatuses.map(pst => `<option value="${pst}" ${(order.payment?.status || 'Pending') === pst ? 'selected' : ''}>${pst}</option>`).join('')}
+          </select>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="ModalComponent.close()">Cancel</button>
+          <button type="button" class="btn btn-primary btn-sm glow-effect" id="save-so-status-btn">Save Order Status ➔</button>
+        </div>
+      </div>
+    `;
+
+    ModalComponent.open(html, { title: 'Update Order Status' });
+
+    document.getElementById('save-so-status-btn')?.addEventListener('click', async () => {
+      const newStatus = document.getElementById('update-so-status-select')?.value;
+      const newPStatus = document.getElementById('update-so-pstatus-select')?.value;
+
+      if (newStatus) {
+        await DBService.updateOrderStatus(order.id, newStatus);
+        ModalComponent.close();
+        NotificationService.showToast('Order status updated.', 'success');
+        AdminViews.renderShopOrdersManagement();
+      }
+    });
   }
 };
+

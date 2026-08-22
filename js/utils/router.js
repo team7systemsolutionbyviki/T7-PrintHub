@@ -2,7 +2,7 @@
    TEAM 7 SYSTEM SOLUTION - SPA ROUTER
    ========================================================================== */
 
-import { AuthService } from '../services/auth-service.js';
+import { AuthService } from '../services/auth-service.js?v=20260822_2';
 
 export const Router = {
   routes: {},
@@ -29,10 +29,11 @@ export const Router = {
     let hash = window.location.hash.slice(1) || 'home';
     let [path, queryStr] = hash.split('?');
 
-    // Route Guard for Admin paths (Auto authenticate admin for seamless access)
-    if (path.startsWith('admin')) {
-      if (!AuthService.isAdmin()) {
-        AuthService.autoLoginAdmin();
+    // Route Guard for Admin paths: require authenticated admin session
+    if (path.startsWith('admin') && path !== 'admin-login') {
+      if (!(await AuthService.isAdminVerified())) {
+        window.location.hash = '#admin-login';
+        return;
       }
     }
 

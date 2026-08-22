@@ -461,3 +461,65 @@ textarea.form-control {
     padding: 0.35rem 0.6rem;
   }
 }
+
+/* ==========================================================================
+   MODULE 1 & 2 — SERVICE BOOKING & SHOP E-COMMERCE STYLES
+   ========================================================================== */
+
+/* Cart Badge Pulse */
+.cart-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  border-radius: 999px;
+  margin-left: 4px;
+  vertical-align: top;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.4);
+  transition: transform 0.2s ease;
+}
+
+.cart-badge:hover {
+  transform: scale(1.15);
+}
+
+/* Service & Product Card Hover Effects */
+.service-card:hover,
+.product-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+  border-color: var(--primary) !important;
+}
+
+/* Step Dots */
+.step-dot {
+  transition: background-color 0.3s ease, transform 0.3s ease;
+}
+
+.step-dot.active {
+  transform: scale(1.2);
+}
+
+/* Upload Dropzone Hover */
+.upload-dropzone:hover {
+  border-color: var(--primary-dark) !important;
+  background: rgba(37, 99, 235, 0.07) !important;
+}
+
+/* Responsive Grid adjustments */
+@media (max-width: 640px) {
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  .wizard-step-panel {
+    padding: 0;
+  }
+}
+
+

@@ -288,7 +288,7 @@ export const InvoiceComponent = {
         <div class="invoice-header" style="display:flex; justify-content:space-between; border-bottom:2px solid #e2e8f0; padding-bottom:1.25rem; margin-bottom:1.25rem;">
           <div>
             <h2 style="color:var(--primary, #2563eb); font-size:1.6rem; font-weight:800; margin:0;">${shopSettings.shopName || 'T7PRINTHUB'}</h2>
-            <p style="font-size:0.85rem; color:#64748b; margin:0.25rem 0 0 0;">${shopSettings.address || 'Chennai, Tamil Nadu'}</p>
+            <p style="font-size:0.85rem; color:#64748b; margin:0.25rem 0 0 0;">${shopSettings.address || (shopSettings.city ? `${shopSettings.city}, ${shopSettings.state || ''}` : '')}</p>
             <p style="font-size:0.85rem; color:#64748b; margin:0.15rem 0 0 0;">Phone: ${shopSettings.phone || ''} | Email: ${shopSettings.email || ''}</p>
           </div>
           <div style="text-align:right;">
@@ -393,80 +393,87 @@ export const InvoiceComponent = {
         </div>
 
         <!-- Section 10 & 11: FINAL BILL TOTAL -->
-        <div style="margin-bottom:1.5rem;">
-          <h3 style="font-size:0.9rem; font-weight:800; text-transform:uppercase; color:#334155; letter-spacing:0.5px; border-bottom:1.5px solid #e2e8f0; padding-bottom:0.4rem; margin-bottom:0.75rem;">BILL SUMMARY</h3>
-          <table style="width:100%; border-collapse:collapse; font-size:0.875rem;">
-            <tbody>
-              ${d.colorAmount > 0 ? `
-                <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:0.45rem 0.75rem;">Color Print Total</td>
-                  <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(d.colorAmount)}</td>
-                </tr>
-              ` : ''}
-              ${d.bwAmount > 0 ? `
-                <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:0.45rem 0.75rem;">B&W Print Total</td>
-                  <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(d.bwAmount)}</td>
-                </tr>
-              ` : ''}
-              ${pricing.bindingCost > 0 ? `
-                <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:0.45rem 0.75rem;">Binding (${d.binding})</td>
-                  <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(pricing.bindingCost)}</td>
-                </tr>
-              ` : ''}
-              ${pricing.laminationCost > 0 ? `
-                <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:0.45rem 0.75rem;">Lamination</td>
-                  <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(pricing.laminationCost)}</td>
-                </tr>
-              ` : ''}
-              ${pricing.deliveryFee > 0 ? `
-                <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:0.45rem 0.75rem;">Delivery Charge (${pricing.deliveryZone || 'Doorstep'})</td>
-                  <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(pricing.deliveryFee)}</td>
-                </tr>
-              ` : ''}
-              ${pricing.productsCost > 0 ? `
-                <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:0.45rem 0.75rem;">Stationery / Products</td>
-                  <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(pricing.productsCost)}</td>
-                </tr>
-              ` : ''}
-              ${pricing.discount > 0 ? `
-                <tr style="border-bottom:1px solid #f1f5f9; color:#059669;">
-                  <td style="padding:0.45rem 0.75rem;">Discount</td>
-                  <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">-${formatCurrency(pricing.discount)}</td>
-                </tr>
-              ` : ''}
-              <tr style="border-top:2px solid #0f172a; font-weight:800; font-size:1.15rem; color:var(--primary, #2563eb);">
-                <td style="padding:0.75rem 0.75rem;">GRAND TOTAL</td>
-                <td style="padding:0.75rem 0.75rem; text-align:right;">${formatCurrency(pricing.total || (d.colorAmount + d.bwAmount + (pricing.bindingCost||0) + (pricing.laminationCost||0) + (pricing.deliveryFee||0) - (pricing.discount||0)))}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Section 12: PAYMENT STATUS FOOTER -->
-        <div style="border-top:1.5px solid #e2e8f0; padding-top:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; font-size:0.875rem;">
+      <div class="invoice-container" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width:800px; margin:0 auto; padding:2rem; background:#ffffff; color:#0f172a; border-radius:12px; border:1px solid #e2e8f0; box-shadow:0 10px 25px rgba(0,0,0,0.05);">
+        <!-- Header -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #3b82f6; padding-bottom:1.5rem; margin-bottom:1.5rem;">
           <div>
-            <p style="margin:0; font-weight:700;">Payment Status: 
-              <span style="color:${isPaid ? '#059669' : isPartial ? '#d97706' : '#2563eb'}; text-transform:uppercase;">${paymentStatus}</span>
-            </p>
-            ${isPartial ? `
-              <p style="margin:0.2rem 0 0 0; font-size:0.8rem; color:#475569;">
-                Paid: <b>${formatCurrency(paidAmount)}</b> | Balance Due: <b style="color:#dc2626;">${formatCurrency(balanceDue)}</b>
-              </p>
-            ` : ''}
-            ${order.payment?.utr ? `<p style="margin:0.2rem 0 0 0; font-size:0.8rem; color:#64748b;">UPI Ref / UTR: <code>${order.payment.utr}</code></p>` : ''}
+            <div style="font-size:1.6rem; font-weight:800; color:#3b82f6; letter-spacing:-0.5px;">${brandName}</div>
+            <p style="margin:0.25rem 0 0; font-size:0.85rem; color:#64748b;">${shopSettings.address || (shopSettings.city ? `${shopSettings.city}, ${shopSettings.state || ''}` : '')}</p>
+            <p style="margin:0.15rem 0 0; font-size:0.85rem; color:#64748b;">Phone: ${brandPhone} | Email: ${brandEmail}</p>
           </div>
           <div style="text-align:right;">
-            <p style="font-weight:700; color:#0f172a; margin:0;">Thank you for choosing ${shopSettings.shopName || 'T7PrintHub'}!</p>
-            <p style="font-size:0.78rem; color:#64748b; margin:0.2rem 0 0 0;">Computer Generated Printing Bill - Valid without signature.</p>
+            <div style="font-size:1.25rem; font-weight:800; color:#0f172a; text-transform:uppercase;">PRINT ORDER INVOICE</div>
+            <div style="font-size:1.1rem; font-weight:700; color:#2563eb; margin-top:0.3rem;">#${order.id || order.orderId}</div>
+            <div style="font-size:0.82rem; color:#64748b; margin-top:0.2rem;">Date: ${formatDate(order.createdAt)}</div>
+          </div>
+        </div>
+
+        <!-- Details -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1.5rem; background:#f8fafc; padding:1.25rem; border-radius:8px; border:1px solid #e2e8f0;">
+          <div>
+            <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#64748b; margin-bottom:0.4rem;">Customer:</div>
+            <div style="font-weight:700; font-size:1rem; color:#0f172a;">${order.customerName || 'Customer'}</div>
+            <div style="font-size:0.85rem; color:#475569; margin-top:0.2rem;">Phone: ${order.customerPhone || 'N/A'}</div>
+            <div style="font-size:0.85rem; color:#475569; margin-top:0.2rem;">Address: ${order.customerAddress || 'N/A'}</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#64748b; margin-bottom:0.4rem;">Print Specification:</div>
+            <div style="font-size:0.85rem; color:#475569;">Paper: <b>${d.paperSize} (${d.gsm})</b></div>
+            <div style="font-size:0.85rem; color:#475569; margin-top:0.2rem;">Sides / Binding: <b>${d.sides} | ${d.binding}</b></div>
+            <div style="font-size:0.85rem; color:#475569; margin-top:0.2rem;">Order Status: <b>${order.status || 'Processing'}</b></div>
+          </div>
+        </div>
+
+        <!-- Pricing Table -->
+        <table style="width:100%; border-collapse:collapse; margin-bottom:1.5rem; font-size:0.9rem;">
+          <thead>
+            <tr style="background:#0f172a; color:#ffffff;">
+              <th style="padding:0.75rem 1rem; text-align:left;">Description</th>
+              <th style="padding:0.75rem 1rem; text-align:right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${d.colorAmount > 0 ? `
+              <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:0.45rem 0.75rem;">Color Print Total</td>
+                <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(d.colorAmount)}</td>
+              </tr>
+            ` : ''}
+            ${d.bwAmount > 0 ? `
+              <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:0.45rem 0.75rem;">B&W Print Total</td>
+                <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(d.bwAmount)}</td>
+              </tr>
+            ` : ''}
+            ${pricing.bindingCost > 0 ? `
+              <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:0.45rem 0.75rem;">Binding (${d.binding})</td>
+                <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(pricing.bindingCost)}</td>
+              </tr>
+            ` : ''}
+            ${pricing.deliveryFee > 0 ? `
+              <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:0.45rem 0.75rem;">Delivery Charge (${pricing.deliveryZone || 'Doorstep'})</td>
+                <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">${formatCurrency(pricing.deliveryFee)}</td>
+              </tr>
+            ` : ''}
+            <tr style="border-top:2px solid #0f172a; font-weight:800; font-size:1.15rem; color:#2563eb;">
+              <td style="padding:0.75rem 0.75rem;">GRAND TOTAL</td>
+              <td style="padding:0.75rem 0.75rem; text-align:right;">${formatCurrency(pricing.total || totalAmount)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Footer -->
+        <div style="border-top:1.5px solid #e2e8f0; padding-top:1rem; display:flex; justify-content:space-between; align-items:center; font-size:0.875rem;">
+          <div>
+            <p style="margin:0; font-weight:700;">Payment Status: <span style="color:${isPaid ? '#059669' : '#2563eb'}; text-transform:uppercase;">${paymentStatus}</span></p>
+          </div>
+          <div style="text-align:right;">
+            <p style="font-weight:700; color:#0f172a; margin:0;">Thank you for choosing ${brandName}!</p>
           </div>
         </div>
       </div>
     `;
   }
 };
-

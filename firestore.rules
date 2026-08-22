@@ -2,21 +2,86 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Orders Collection
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active != false
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['ADMIN', 'SUPER_ADMIN'];
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // Admin/user profiles
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      // Prevent clients from assigning themselves an admin role.
+      allow create: if isOwner(userId)
+        && request.resource.data.role in ['CUSTOMER', 'STAFF'];
+      allow update: if isAdmin()
+        || (isOwner(userId)
+            && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    // File metadata rules (Google Drive file records)
+    match /files/{fileId} {
+      allow create: if signedIn();
+      allow read: if isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
+      allow update, delete: if isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
+    }
+
+    // Customers can submit orders. Only admins can inspect/change them.
     match /orders/{orderId} {
-      allow read, create, update, delete: if true;
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
     }
 
-    // Shop Settings & Config
-    match /settings/{settingId} {
+    // Customers can submit service bookings. Only admins can inspect/change them.
+    match /serviceBookings/{bookingId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Public catalog reads; admin-only writes.
+    match /services/{serviceId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isAdmin();
     }
 
-    // Services Catalog
+    match /serviceCategories/{catId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /productCategories/{catId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /catalog/{catalogId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    match /technicians/{techId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Public storefront configuration; only admins can change it.
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

@@ -125,9 +125,15 @@ function hideLoader() {
 const initApp = async () => {
   try {
     // ── Step 1: Register all SPA routes ──────────────────────────────────────
-    Router.register('home',        (q) => { NavbarComponent.render(); PublicViews.renderHome(q);      window.updateFloatingButtons(); });
-    Router.register('services',    (q) => { NavbarComponent.render(); PublicViews.renderServices(q);  window.updateFloatingButtons(); });
-    Router.register('pricing',     (q) => { NavbarComponent.render(); PublicViews.renderPriceList(q); window.updateFloatingButtons(); });
+    // Customer Public Routes
+    Router.register('home',             (q) => { NavbarComponent.render(); PublicViews.renderHome(q);           window.updateFloatingButtons(); });
+    Router.register('services',         (q) => { NavbarComponent.render(); PublicViews.renderServices(q);       window.updateFloatingButtons(); });
+    Router.register('service-booking',  (q) => { NavbarComponent.render(); PublicViews.renderServiceBooking(q);  window.updateFloatingButtons(); });
+    Router.register('track-booking',    (q) => { NavbarComponent.render(); PublicViews.renderTrackBooking(q);    window.updateFloatingButtons(); });
+    Router.register('shop',             (q) => { NavbarComponent.render(); PublicViews.renderShop(q);           window.updateFloatingButtons(); });
+    Router.register('cart',             (q) => { NavbarComponent.render(); PublicViews.renderCart(q);           window.updateFloatingButtons(); });
+    Router.register('checkout',         (q) => { NavbarComponent.render(); PublicViews.renderCheckout(q);       window.updateFloatingButtons(); });
+    Router.register('pricing',          (q) => { NavbarComponent.render(); PublicViews.renderPriceList(q);      window.updateFloatingButtons(); });
     Router.register('how-it-works', async (q) => {
       NavbarComponent.render();
       await PublicViews.renderHome(q);
@@ -137,11 +143,11 @@ const initApp = async () => {
       }, 80);
       window.updateFloatingButtons();
     });
-    Router.register('faq',     (q) => { NavbarComponent.render(); PublicViews.renderFAQ(q);         window.updateFloatingButtons(); });
-    Router.register('order',   (q) => { NavbarComponent.render(); PublicViews.renderOrderPrint(q);  window.updateFloatingButtons(); });
-    Router.register('service-request', (q) => { NavbarComponent.render(); PublicViews.renderServiceRequest(q); window.updateFloatingButtons(); });
-    Router.register('track',   (q) => { NavbarComponent.render(); PublicViews.renderTrackOrder(q);  window.updateFloatingButtons(); });
-    Router.register('contact', (q) => { NavbarComponent.render(); PublicViews.renderContact(q);     window.updateFloatingButtons(); });
+    Router.register('faq',             (q) => { NavbarComponent.render(); PublicViews.renderFAQ(q);              window.updateFloatingButtons(); });
+    Router.register('order',           (q) => { NavbarComponent.render(); PublicViews.renderOrderPrint(q);       window.updateFloatingButtons(); });
+    Router.register('service-request', (q) => { NavbarComponent.render(); PublicViews.renderServiceRequest(q);   window.updateFloatingButtons(); });
+    Router.register('track',           (q) => { NavbarComponent.render(); PublicViews.renderTrackOrder(q);       window.updateFloatingButtons(); });
+    Router.register('contact',         (q) => { NavbarComponent.render(); PublicViews.renderContact(q);          window.updateFloatingButtons(); });
     Router.register('privacy', (q) => {
       NavbarComponent.render();
       const app = document.getElementById('app-content');
@@ -177,6 +183,11 @@ const initApp = async () => {
     Router.register('admin-login',        (q) => { NavbarComponent.render(); AdminViews.renderLogin(q); });
     Router.register('admin-dashboard',    (q) => { AdminViews.renderDashboard(q); });
     Router.register('admin-orders',       (q) => { AdminViews.renderOrders(q); });
+    Router.register('admin-services',     (q) => { AdminViews.renderServicesManagement(q); });
+    Router.register('admin-bookings',     (q) => { AdminViews.renderBookingsManagement(q); });
+    Router.register('admin-technicians',  (q) => { AdminViews.renderTechniciansManagement(q); });
+    Router.register('admin-shop',         (q) => { AdminViews.renderShopProductsManagement(q); });
+    Router.register('admin-shop-orders',  (q) => { AdminViews.renderShopOrdersManagement(q); });
     Router.register('admin-pricing',      (q) => { AdminViews.renderPricing(q); });
     Router.register('admin-catalog',      (q) => { AdminViews.renderCatalog(q); });
     Router.register('admin-customers',    (q) => { AdminViews.renderCustomers(q); });
@@ -185,6 +196,11 @@ const initApp = async () => {
 
     // Customer Route
     Router.register('customer-dashboard', (q) => { NavbarComponent.render(); CustomerViews.renderCustomerDashboard(q); });
+
+    // Cart updated listener
+    window.addEventListener('cartUpdated', () => {
+      NavbarComponent.render();
+    });
 
     // ── Step 2: Register global event listeners ───────────────────────────────
 
@@ -230,7 +246,22 @@ const initApp = async () => {
 
       console.log('[APP] Firebase Shop Settings and Service Catalog loaded');
     } catch (firebaseErr) {
-      console.warn('[APP] Firebase init failed, using defaults:', firebaseErr);
+      console.error('[APP] Firebase initialization failed:', firebaseErr);
+      const app = document.getElementById('app-content');
+      if (app) {
+        app.innerHTML = `
+          <section style="min-height:70vh;display:flex;align-items:center;justify-content:center;padding:2rem;text-align:center;">
+            <div class="glass-panel" style="max-width:650px;padding:2.5rem;">
+              <div style="font-size:3rem;margin-bottom:1rem;">⚠️</div>
+              <h2>Online Service Unavailable</h2>
+              <p class="text-muted" style="margin:1rem 0;">
+                T7 PrintHub could not connect to Firebase. No offline/demo mode is being used.
+              </p>
+              <button class="btn btn-primary" onclick="location.reload()">Retry Connection</button>
+            </div>
+          </section>`;
+      }
+      return;
     }
 
     // ── Step 5: RENDER the application ────────────────────────────────────────

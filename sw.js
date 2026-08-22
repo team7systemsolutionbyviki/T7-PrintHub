@@ -1,20 +1,15 @@
 /* ==========================================================================
    T7-PRINT HUB - SERVICE WORKER
-   Cache Version: v8
+   Cache Version: v9
    ========================================================================== */
 
-const CACHE_NAME = 't7-printhub-v8';
+const CACHE_NAME = 't7-printhub-v9';
 
 // Firebase and external services that must NEVER be intercepted
 const BYPASS_ORIGINS = [
-  'firebasestorage.googleapis.com',
-  'firestore.googleapis.com',
-  'firebase.googleapis.com',
   'identitytoolkit.googleapis.com',
   'securetoken.googleapis.com',
-  'googleapis.com',
   'gstatic.com',
-  'firebaseio.com',
   'firebase.com'
 ];
 

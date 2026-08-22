@@ -1,0 +1,13 @@
+node_modules/
+functions/node_modules/
+.env
+.env.local
+.env.*.local
+*.json.key
+*service-account*.json
+*-service-account*.json
+serviceAccountKey*.json
+.runtimeconfig.json
+.firebase/
+.DS_Store
+Thumbs.db

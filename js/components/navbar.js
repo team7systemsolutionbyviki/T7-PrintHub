@@ -2,14 +2,16 @@
    TEAM 7 SYSTEM SOLUTION - NAVBAR & THEME & LANGUAGE COMPONENT
    ========================================================================== */
 
-import { AuthService } from '../services/auth-service.js';
+import { AuthService } from '../services/auth-service.js?v=20260822_2';
 import { DBService } from '../services/db-service.js';
 import { I18nService } from '../services/i18n-service.js';
+import { CartService } from '../services/cart-service.js';
 
 export const NavbarComponent = {
   async render() {
     const user = AuthService.getCurrentUser();
     const settings = DBService.getSettingsSync();
+    const cartCount = CartService.getItemCount();
     const currentTheme = localStorage.getItem('team7_theme') || 'light';
     document.documentElement.setAttribute('data-theme', currentTheme);
 
@@ -30,7 +32,7 @@ export const NavbarComponent = {
       footerBrand.innerHTML = `<span style="color:var(--primary);">${settings.shopName || 'Print Hub'}</span>`;
     }
     if (settings.shopName) {
-      document.title = `${settings.shopName} | Online Document Printing & Management`;
+      document.title = `${settings.shopName} | Service Booking, Shop & Online Printing`;
     }
 
     // Footer phone link
@@ -74,16 +76,22 @@ export const NavbarComponent = {
 
           <ul class="nav-links">
             <li><a href="#home" class="nav-link">${I18nService.t('nav_home')}</a></li>
-            <li><a href="#services" class="nav-link">${I18nService.t('nav_services')}</a></li>
+            <li><a href="#services" class="nav-link">Services Catalog</a></li>
+            <li><a href="#service-booking" class="nav-link" style="color:var(--primary); font-weight:600;">🔧 Book Service</a></li>
+            <li><a href="#shop" class="nav-link" style="color:var(--secondary); font-weight:600;">🛍️ Shop</a></li>
             <li><a href="#pricing" class="nav-link">${I18nService.t('nav_pricing')}</a></li>
-            <li><a href="#how-it-works" class="nav-link">${I18nService.t('nav_how_it_works')}</a></li>
-            <li><a href="#order" class="nav-link">${I18nService.t('nav_order')}</a></li>
+            <li><a href="#order" class="nav-link">🖨️ ${I18nService.t('nav_order')}</a></li>
             <li><a href="#track" class="nav-link">${I18nService.t('nav_track')}</a></li>
-            <li><a href="#faq" class="nav-link">${I18nService.t('nav_faq')}</a></li>
             <li><a href="#contact" class="nav-link">${I18nService.t('nav_contact')}</a></li>
           </ul>
 
           <div class="nav-actions">
+            <!-- Cart Button -->
+            <a href="#cart" class="cart-btn" id="cart-nav-btn" title="Shopping Cart" style="position:relative; display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:50%; background:var(--bg-card); border:1px solid var(--border-color); text-decoration:none; font-size:1.2rem;">
+              🛒
+              <span id="cart-badge-count" style="position:absolute; top:-4px; right:-4px; background:var(--primary); color:white; font-size:0.7rem; font-weight:800; border-radius:10px; padding:2px 6px; line-height:1; display:${cartCount > 0 ? 'inline-block' : 'none'};">${cartCount}</span>
+            </a>
+
             <!-- Modern Language Switcher Dropdown -->
             <div class="lang-switcher-wrapper" id="lang-switcher-wrapper">
               <button type="button" 
@@ -122,7 +130,7 @@ export const NavbarComponent = {
             ${(user && user.role === 'CUSTOMER') ? `
               <a href="#customer-dashboard" class="btn btn-sm btn-primary">${I18nService.t('nav_my_dashboard')}</a>
             ` : `
-              <a href="#order" class="btn btn-sm btn-primary glow-effect">${I18nService.t('nav_print_now')}</a>
+              <a href="#service-booking" class="btn btn-sm btn-primary glow-effect">🔧 Book Service</a>
             `}
 
             <button class="mobile-nav-toggle" id="mobile-nav-toggle">☰</button>
@@ -230,16 +238,16 @@ export const NavbarComponent = {
         <button id="mobile-drawer-close" style="background:transparent; border:none; font-size:1.5rem; cursor:pointer; color:var(--text-muted); padding:0.25rem;">✕</button>
       </div>
       <div class="mobile-drawer-links">
-        <a href="#home"         class="mobile-drawer-link">🏠 ${I18nService.t('nav_home')}</a>
-        <a href="#services"     class="mobile-drawer-link">🖨️ ${I18nService.t('nav_services')}</a>
-        <a href="#pricing"      class="mobile-drawer-link">💰 ${I18nService.t('nav_pricing')}</a>
-        <a href="#how-it-works" class="mobile-drawer-link">📋 ${I18nService.t('nav_how_it_works')}</a>
-        <a href="#order"        class="mobile-drawer-link">📄 ${I18nService.t('nav_order')}</a>
-        <a href="#track"        class="mobile-drawer-link">🔍 ${I18nService.t('nav_track')}</a>
-        <a href="#faq"          class="mobile-drawer-link">❓ ${I18nService.t('nav_faq')}</a>
-        <a href="#contact"      class="mobile-drawer-link">📞 ${I18nService.t('nav_contact')}</a>
-        <a href="#order" class="btn btn-primary" style="margin:0.75rem 0; justify-content:center; min-height:48px;">
-          🖨️ ${I18nService.t('nav_print_now')}
+        <a href="#home"             class="mobile-drawer-link">🏠 ${I18nService.t('nav_home')}</a>
+        <a href="#services"         class="mobile-drawer-link">🖨️ Services Catalog</a>
+        <a href="#service-booking"  class="mobile-drawer-link" style="color:var(--primary); font-weight:700;">🔧 Book a Service</a>
+        <a href="#shop"             class="mobile-drawer-link" style="color:var(--secondary); font-weight:700;">🛍️ E-Commerce Shop</a>
+        <a href="#cart"             class="mobile-drawer-link">🛒 Cart (${cartCount})</a>
+        <a href="#order"            class="mobile-drawer-link">📄 ${I18nService.t('nav_order')}</a>
+        <a href="#track"            class="mobile-drawer-link">🔍 ${I18nService.t('nav_track')}</a>
+        <a href="#contact"          class="mobile-drawer-link">📞 ${I18nService.t('nav_contact')}</a>
+        <a href="#service-booking" class="btn btn-primary" style="margin:0.75rem 0; justify-content:center; min-height:48px;">
+          🔧 Book Service Now
         </a>
       </div>
       <div class="mobile-drawer-footer">

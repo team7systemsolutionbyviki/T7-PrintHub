@@ -1,0 +1,13 @@
+# ==============================================================================
+# T7 PRINT HUB — UPLOADS DIRECTORY SECURITY (.htaccess)
+# Prevents execution of any uploaded server-side scripts or executables.
+# ==============================================================================
+
+# Disable directory listing
+Options -Indexes -ExecCGI
+
+# Prevent execution of any PHP scripts or server side code
+<FilesMatch "\.(php|php3|php4|php5|phtml|phar|cgi|pl|py|js|sh|bat|cmd|exe)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
