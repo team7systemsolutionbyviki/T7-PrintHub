@@ -14,7 +14,6 @@ function getDbConnection() {
     }
 
     $pass = defined('DB_PASSWORD') ? DB_PASSWORD : '';
-    $port = defined('DB_PORT') ? DB_PORT : '3306';
 
     $hosts = array_unique([
         defined('DB_HOST') ? DB_HOST : 'localhost',
@@ -24,17 +23,17 @@ function getDbConnection() {
     ]);
 
     $dbNames = array_unique([
-        defined('DB_NAME') ? DB_NAME : 'u700928676_t7_printhub',
-        'u700928676_t7_printhub',
+        defined('DB_NAME') ? DB_NAME : 'u700928676_t7printhub',
         'u700928676_t7printhub',
+        'u700928676_t7_printhub',
         'u700928676_t7hub'
     ]);
 
     $dbUsers = array_unique([
         defined('DB_USER') ? DB_USER : 'u700928676_t7_admin',
         'u700928676_t7_admin',
-        'u700928676_t7user',
-        'u700928676_t7admin'
+        'u700928676_t7admin',
+        'u700928676_t7user'
     ]);
 
     $lastError = null;
@@ -46,7 +45,10 @@ function getDbConnection() {
             foreach ($dbUsers as $u) {
                 if (empty($u)) continue;
                 try {
-                    $dsn = "mysql:host={$h};port={$port};dbname={$db};charset=utf8mb4";
+                    $dsn = ($h === 'localhost')
+                        ? "mysql:host=localhost;dbname={$db};charset=utf8mb4"
+                        : "mysql:host={$h};port=3306;dbname={$db};charset=utf8mb4";
+
                     $options = [
                         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
