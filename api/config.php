@@ -6,12 +6,8 @@ if (file_exists(__DIR__ . '/config.local.php')) {
     require_once __DIR__ . '/config.local.php';
 }
 
-// IMPORTANT:
-// Put your REAL Hostinger MySQL values in config.local.php.
-// Do not use root / empty password on Hostinger.
-
 if (!defined('DB_HOST')) {
-    define('DB_HOST', 'YOUR_HOSTINGER_DB_HOST');
+    define('DB_HOST', 'localhost');
 }
 
 if (!defined('DB_PORT')) {
@@ -19,15 +15,15 @@ if (!defined('DB_PORT')) {
 }
 
 if (!defined('DB_NAME')) {
-    define('DB_NAME', 'YOUR_HOSTINGER_DATABASE_NAME');
+    define('DB_NAME', 'u700928676_t7_printhub');
 }
 
 if (!defined('DB_USER')) {
-    define('DB_USER', 'YOUR_HOSTINGER_DATABASE_USERNAME');
+    define('DB_USER', 'u700928676_t7_admin');
 }
 
 if (!defined('DB_PASSWORD')) {
-    define('DB_PASSWORD', 'YOUR_HOSTINGER_DATABASE_PASSWORD');
+    define('DB_PASSWORD', 'viki1101@VIKI');
 }
 
 if (!defined('FIREBASE_PROJECT_ID')) {
