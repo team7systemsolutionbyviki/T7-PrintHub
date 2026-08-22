@@ -33,7 +33,7 @@ function getDbConnection() {
 
         if ($pdo === null) {
             error_log("[Database Connection Error]: " . $lastError);
-            sendError('Database connection failed. Please check hostinger MySQL configuration.', 500);
+            sendError('Database connection failed: ' . $lastError, 500);
         }
     }
 
